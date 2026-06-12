@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+build/
+target/
+.env
+.env.*
+!.env.example
+!.env.production.example
