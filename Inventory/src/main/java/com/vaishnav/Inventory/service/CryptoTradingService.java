@@ -106,23 +106,37 @@ public class CryptoTradingService {
         int seed = Math.abs(symbol.hashCode());
         Map<String, Object> marketPrice = marketPrices.getOrDefault(symbol, fallbackPrice(symbol));
         double price = asDouble(marketPrice.get("price"));
-        double atr = switch (symbol) {
+        boolean liveCmc = "COINMARKETCAP".equals(marketPrice.get("source"));
+        double change1h = asDouble(marketPrice.getOrDefault("percentChange1h", 0));
+        double change24h = asDouble(marketPrice.getOrDefault("percentChange24h", 0));
+        double change7d = asDouble(marketPrice.getOrDefault("percentChange7d", 0));
+        double volume24h = asDouble(marketPrice.getOrDefault("volume24h", 0));
+        double baseAtr = switch (symbol) {
             case "BTCUSDT" -> 1850.0;
             case "ETHUSDT" -> 112.0;
             default -> 7.8;
         };
+        double atr = liveCmc
+                ? Math.max(baseAtr * 0.35, price * Math.max(0.006, Math.abs(change24h) / 100.0) * 0.42)
+                : baseAtr;
 
         List<Map<String, Object>> timeframes = List.of(
-                timeframe(symbol, "15m", seed, price, 0),
-                timeframe(symbol, "1h", seed, price, 1),
-                timeframe(symbol, "4h", seed, price, 2)
+                timeframe("15m", price, change1h, 0),
+                timeframe("1h", price, change24h, 1),
+                timeframe("4h", price, change7d, 2)
         );
         long longFrames = timeframes.stream().filter(tf -> "LONG".equals(tf.get("signal"))).count();
-        String technicalSignal = longFrames >= 2 ? "LONG" : "SHORT";
-        int indicatorBullish = 52 + (seed % 31);
+        long shortFrames = timeframes.size() - longFrames;
+        String technicalSignal = longFrames == shortFrames ? "NO_TRADE" : longFrames > shortFrames ? "LONG" : "SHORT";
+        double momentumScore = 50 + change1h * 8 + change24h * 2.2 + change7d * 0.65;
+        int indicatorBullish = liveCmc
+                ? (int) Math.round(Math.max(18, Math.min(82, momentumScore)))
+                : 50;
         int technicalScore = Math.min(95, Math.max(30, indicatorBullish));
-        String newsRisk = (seed % 5 == 0) ? "HIGH" : "NORMAL";
-        int volumeScore = 58 + (seed % 35);
+        String newsRisk = Math.abs(change1h) >= 3.5 || Math.abs(change24h) >= 9 ? "HIGH" : "NORMAL";
+        int volumeScore = liveCmc
+                ? (int) Math.round(Math.max(45, Math.min(92, 55 + Math.log10(Math.max(1, volume24h)) * 3.2)))
+                : 50;
 
         List<Map<String, Object>> aiVotes = AI_ENGINES.stream().map(ai -> aiVote(ai, symbol, technicalSignal, technicalScore)).toList();
         long longVotes = aiVotes.stream().filter(vote -> "LONG".equals(vote.get("signal"))).count();
@@ -142,9 +156,11 @@ public class CryptoTradingService {
         double takeProfit = "LONG".equals(finalSignal) ? entry + takeDistance : entry - takeDistance;
         double trailingStop = "LONG".equals(finalSignal) ? entry + atr * 0.55 : entry - atr * 0.55;
         double finalScore = Math.round(confidence * 0.4 + technicalScore * 0.25 + volumeScore * 0.2 + ("HIGH".equals(newsRisk) ? 35 : 85) * 0.15);
-        boolean allowed = finalScore >= 75
+        boolean allowed = liveCmc
+                && finalScore >= 75
                 && confidence >= 75
-                && alignedFrames == 3
+                && alignedFrames >= 2
+                && !"NO_TRADE".equals(finalSignal)
                 && !"HIGH".equals(newsRisk)
                 && riskReward >= 2
                 && aiVotes.stream().filter(vote -> finalSignal.equals(vote.get("signal"))).count() >= 3;
@@ -160,6 +176,11 @@ public class CryptoTradingService {
         signal.put("currentPrice", price);
         signal.put("priceSource", marketPrice.get("source"));
         signal.put("marketWarning", marketPrice.get("warning"));
+        signal.put("lastUpdated", marketPrice.get("lastUpdated"));
+        signal.put("percentChange1h", change1h);
+        signal.put("percentChange24h", change24h);
+        signal.put("percentChange7d", change7d);
+        signal.put("volume24h", volume24h);
         signal.put("stopLoss", stopLoss);
         signal.put("takeProfit", takeProfit);
         signal.put("trailingStop", trailingStop);
@@ -170,9 +191,9 @@ public class CryptoTradingService {
         signal.put("aiConsensus", "LONG=" + (longVotes * 100 / AI_ENGINES.size()) + "% SHORT=" + (shortVotes * 100 / AI_ENGINES.size()) + "%");
         signal.put("bestAi", aiVotes.get(seed % aiVotes.size()).get("ai"));
         signal.put("indicatorSummary", Map.of("total", INDICATOR_COUNT, "bullish", indicatorBullish, "bearish", INDICATOR_COUNT - indicatorBullish));
-        signal.put("technicalSummary", technicalSignal + " | volumeScore=" + volumeScore + " | MA50/100/200 checked | RR=" + riskReward);
+        signal.put("technicalSummary", technicalSignal + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | volumeScore=" + volumeScore + " | RR=" + riskReward);
         signal.put("newsRisk", newsRisk);
-        signal.put("blockReason", allowed ? "" : blockReason(confidence, alignedFrames, newsRisk, finalScore));
+        signal.put("blockReason", allowed ? "" : blockReason(liveCmc, confidence, alignedFrames, newsRisk, finalScore, finalSignal));
         return signal;
     }
 
@@ -208,6 +229,12 @@ public class CryptoTradingService {
                 if (priceObj instanceof Number number) {
                     Map<String, Object> value = new LinkedHashMap<>();
                     value.put("price", number.doubleValue());
+                    value.put("percentChange1h", numberValue(usdMap.get("percent_change_1h")));
+                    value.put("percentChange24h", numberValue(usdMap.get("percent_change_24h")));
+                    value.put("percentChange7d", numberValue(usdMap.get("percent_change_7d")));
+                    value.put("volume24h", numberValue(usdMap.get("volume_24h")));
+                    value.put("marketCap", numberValue(usdMap.get("market_cap")));
+                    value.put("lastUpdated", usdMap.get("last_updated"));
                     value.put("source", "COINMARKETCAP");
                     value.put("warning", "");
                     prices.put(coin + "USDT", value);
@@ -232,18 +259,23 @@ public class CryptoTradingService {
         };
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("price", price);
+        value.put("percentChange1h", 0);
+        value.put("percentChange24h", 0);
+        value.put("percentChange7d", 0);
+        value.put("volume24h", 0);
+        value.put("lastUpdated", "");
         value.put("source", "FALLBACK_CMC_KEY_MISSING");
-        value.put("warning", "Set COINMARKETCAP_API_KEY to use live CoinMarketCap price");
+        value.put("warning", "CoinMarketCap API key missing. Set COINMARKETCAP_API_KEY in Render; live signals paused.");
         return value;
     }
 
-    private Map<String, Object> timeframe(String symbol, String timeframe, int seed, double price, int index) {
-        double drift = ((seed + index * 17) % 34 - 12) / 1000.0;
-        double ma50 = price * (1 + drift);
-        double ma100 = price * (1 + drift - 0.004);
-        double ma200 = price * (1 + drift - 0.008);
-        int rsi = 48 + ((seed + index * 11) % 28);
-        String signal = price > ma50 && ma50 > ma100 && ma100 > ma200 && rsi >= 52 ? "LONG" : "SHORT";
+    private Map<String, Object> timeframe(String timeframe, double price, double changePercent, int index) {
+        double drift = changePercent / 100.0;
+        double ma50 = price / (1 + drift * 0.25);
+        double ma100 = price / (1 + drift * 0.45);
+        double ma200 = price / (1 + drift * 0.7);
+        int rsi = (int) Math.round(Math.max(22, Math.min(78, 50 + changePercent * (index == 0 ? 7 : index == 1 ? 3.5 : 1.2))));
+        String signal = changePercent > 0.18 && rsi >= 52 ? "LONG" : changePercent < -0.18 && rsi <= 48 ? "SHORT" : "NO_TRADE";
         return Map.of(
                 "timeframe", timeframe,
                 "signal", signal,
@@ -251,13 +283,15 @@ public class CryptoTradingService {
                 "ma100", ma100,
                 "ma200", ma200,
                 "rsi", rsi,
-                "volume", 1.1 + ((seed + index) % 12) / 10.0
+                "volume", round(1 + Math.min(2.5, Math.abs(changePercent) / Math.max(0.5, index + 1)))
         );
     }
 
     private Map<String, Object> aiVote(String ai, String symbol, String technicalSignal, int technicalScore) {
         int score = Math.abs((ai + symbol).hashCode());
-        String signal = score % 100 > 28 ? technicalSignal : ("LONG".equals(technicalSignal) ? "SHORT" : "LONG");
+        String signal = "NO_TRADE".equals(technicalSignal)
+                ? "NO_TRADE"
+                : score % 100 > 28 ? technicalSignal : ("LONG".equals(technicalSignal) ? "SHORT" : "LONG");
         int confidence = Math.min(92, 62 + (score % 31) + Math.max(0, technicalScore - 70) / 3);
         return Map.of(
                 "ai", ai,
@@ -327,11 +361,25 @@ public class CryptoTradingService {
     }
 
     private String blockReason(double confidence, long longFrames, String newsRisk, double finalScore) {
+        return blockReason(true, confidence, longFrames, newsRisk, finalScore, "");
+    }
+
+    private String blockReason(boolean liveCmc, double confidence, long alignedFrames, String newsRisk, double finalScore, String finalSignal) {
+        if (!liveCmc) return "CoinMarketCap live API key missing";
         if (confidence < 75) return "AI confidence below 75";
-        if (longFrames < 3) return "Multi-timeframe not aligned";
+        if ("NO_TRADE".equals(finalSignal)) return "CMC momentum is neutral";
+        if (alignedFrames < 2) return "Multi-timeframe not aligned";
         if ("HIGH".equals(newsRisk)) return "High news risk";
         if (finalScore < 75) return "Final accuracy score below 75";
         return "Risk rule blocked";
+    }
+
+    private double numberValue(Object value) {
+        return value instanceof Number number ? number.doubleValue() : 0;
+    }
+
+    private double round(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 
     private double asDouble(Object value) {

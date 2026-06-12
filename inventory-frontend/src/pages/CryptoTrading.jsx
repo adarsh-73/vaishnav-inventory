@@ -159,6 +159,7 @@ function CryptoTrading() {
             </div>
             <div style={signalTextStyle(plan.direction)}>{plan.direction}</div>
             <div style={coinMeta}>Price {formatPrice(plan.entry)} | Source {plan.priceSource || "CMC"}</div>
+            <div style={coinMeta}>CMC 1h {formatPercent(plan.percentChange1h)} | 24h {formatPercent(plan.percentChange24h)} | 7d {formatPercent(plan.percentChange7d)}</div>
             <div style={coinMeta}>Entry {formatPrice(plan.entry)} | SL {formatPrice(plan.stopLoss)} | Book {formatPrice(plan.takeProfit)}</div>
             {plan.marketWarning && <div style={warningText}>{plan.marketWarning}</div>}
           </button>
@@ -194,6 +195,8 @@ function CryptoTrading() {
             <Info label="Close / Trail" value={formatPrice(selectedPlan.trailingStop)} />
             <Info label="Confidence" value={`${selectedPlan.confidence}%`} />
             <Info label="Price Source" value={selectedPlan.priceSource || "CMC"} />
+            <Info label="CMC 24h" value={formatPercent(selectedPlan.percentChange24h)} />
+            <Info label="Updated" value={formatUpdated(selectedPlan.lastUpdated)} />
             <Info label="Position Size" value={`${selectedPlan.positionSize.toFixed(4)} ${selectedPlan.symbol}`} />
             <Info label="Risk Amount" value={formatUsd(selectedPlan.riskAmount)} danger />
           </div>
@@ -378,6 +381,10 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
       entry: Number(signal.entry || fallbackPlan.entry),
       priceSource: signal.priceSource || fallbackPlan.priceSource || "FALLBACK",
       marketWarning: signal.marketWarning || "",
+      percentChange1h: Number(signal.percentChange1h || 0),
+      percentChange24h: Number(signal.percentChange24h || 0),
+      percentChange7d: Number(signal.percentChange7d || 0),
+      lastUpdated: signal.lastUpdated || "",
       stopLoss: Number(signal.stopLoss || fallbackPlan.stopLoss),
       takeProfit: Number(signal.takeProfit || fallbackPlan.takeProfit),
       trailingStop: Number(signal.trailingStop || fallbackPlan.trailingStop),
@@ -433,60 +440,49 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
 
 function buildPlan(symbol, settings) {
   const market = MARKETS[symbol];
-  const timeframes = Object.fromEntries(TIMEFRAMES.map((tf, index) => [tf, buildTimeframe(market, tf, index)]));
-  const timeframeScore = Math.round(Object.values(timeframes).reduce((sum, row) => sum + row.score, 0) / TIMEFRAMES.length);
-  const indicatorBreadth = buildIndicatorBreadth(symbol, timeframeScore);
-  const aiVotes = AI_ENGINES.map((name, index) => {
-    const raw = (market.seed + timeframeScore + indicatorBreadth.score + index * 13) % 100;
-    const signal = raw >= 42 ? "LONG" : "SHORT";
-    const confidence = 62 + ((raw + index * 7) % 31);
-    return {
-      name,
-      signal,
-      confidence,
-      exit: signal === "LONG" ? "Book near TP, trail below higher-low" : "Book near TP, trail above lower-high"
-    };
-  });
-  const longVotes = aiVotes.filter((vote) => vote.signal === "LONG").length;
-  const shortVotes = aiVotes.length - longVotes;
-  const direction = longVotes >= shortVotes ? "LONG" : "SHORT";
-  const sameSideVotes = aiVotes.filter((vote) => vote.signal === direction);
-  const confidence = Math.round(sameSideVotes.reduce((sum, vote) => sum + vote.confidence, 0) / sameSideVotes.length);
-  const atr = market.atr4h;
+  const timeframes = Object.fromEntries(TIMEFRAMES.map((tf) => [tf, buildWaitingTimeframe(market)]));
+  const indicatorBreadth = { bullish: 0, bearish: INDICATORS.length, score: 0, signals: [] };
+  const aiVotes = AI_ENGINES.map((name) => ({
+    name,
+    signal: "NO_TRADE",
+    confidence: 0,
+    exit: "Backend/CoinMarketCap data ka wait"
+  }));
+  const direction = "NO_TRADE";
+  const confidence = 0;
+  const atr = Math.max(market.price * 0.01, 1);
   const entry = market.price;
-  const stopDistance = atr * 0.82;
-  const takeDistance = stopDistance * 1.9;
-  const stopLoss = direction === "LONG" ? entry - stopDistance : entry + stopDistance;
-  const takeProfit = direction === "LONG" ? entry + takeDistance : entry - takeDistance;
-  const trailingStop = direction === "LONG" ? entry + atr * 0.55 : entry - atr * 0.55;
+  const stopDistance = atr;
+  const stopLoss = entry - stopDistance;
+  const takeProfit = entry + stopDistance * 2;
+  const trailingStop = entry;
   const riskAmount = Number(settings.capital || 0) * Number(settings.riskPercent || 0) / 100;
   const positionUsdt = Math.min(Number(settings.capital || 0) * Number(settings.maxLeverage || 1), riskAmount / (stopDistance / entry || 1));
   const positionSize = Math.max(0, positionUsdt / entry);
-  const trendAligned = Object.values(timeframes).filter((row) => row.signal === direction).length >= 2;
   const rules = [
-    { name: `AI confidence ${settings.confidenceGate}% se upar`, pass: confidence >= Number(settings.confidenceGate || 0) },
-    { name: `${INDICATORS.length} indicator payload AI ko ready`, pass: INDICATORS.length >= 100 },
-    { name: `Indicator breadth ${indicatorBreadth.bullish}/${INDICATORS.length}`, pass: indicatorBreadth.bullish >= 55 },
-    { name: "15m, 1h, 4h me 2 timeframe align", pass: trendAligned },
-    { name: "Risk per trade 2% se kam", pass: Number(settings.riskPercent || 0) > 0 && Number(settings.riskPercent || 0) <= 2 },
-    { name: "Max leverage 5x se kam", pass: Number(settings.maxLeverage || 0) > 0 && Number(settings.maxLeverage || 0) <= 5 },
-    { name: `Daily loss ${settings.dailyLossLimit}% kill switch ke andar`, pass: Number(settings.dailyLossLimit || 0) > 0 && Number(settings.dailyLossLimit || 0) <= 5 }
+    { name: "Backend dashboard load hona chahiye", pass: false },
+    { name: "CoinMarketCap live price required", pass: false },
+    { name: "Fake local signal disabled", pass: true }
   ];
-  const allowed = rules.every((rule) => rule.pass);
+  const allowed = false;
   const paper = buildPaperStats(symbol, confidence, direction, allowed, settings.capital);
 
   return {
     symbol,
     direction,
     confidence,
-    longVotes,
-    shortVotes,
+    longVotes: 0,
+    shortVotes: 0,
     aiVotes,
     indicatorBreadth,
     timeframes,
     entry,
-    priceSource: "LOCAL_SIMULATION",
-    marketWarning: "Backend/CoinMarketCap load nahi hua",
+    priceSource: "WAITING_FOR_BACKEND",
+    marketWarning: "Backend/CoinMarketCap live data load nahi hua. Fake trade signal disabled hai.",
+    percentChange1h: 0,
+    percentChange24h: 0,
+    percentChange7d: 0,
+    lastUpdated: "",
     stopLoss,
     takeProfit,
     trailingStop,
@@ -498,36 +494,14 @@ function buildPlan(symbol, settings) {
   };
 }
 
-function buildIndicatorBreadth(symbol, timeframeScore) {
-  const market = MARKETS[symbol];
-  const signals = INDICATORS.map((indicator, index) => {
-    const score = (market.seed + timeframeScore + indicator.length + index * 7) % 100;
-    return { indicator, bullish: score >= 45, score };
-  });
-  const bullish = signals.filter((item) => item.bullish).length;
+function buildWaitingTimeframe(market) {
   return {
-    bullish,
-    bearish: INDICATORS.length - bullish,
-    score: Math.round(signals.reduce((sum, item) => sum + item.score, 0) / signals.length),
-    signals
-  };
-}
-
-function buildTimeframe(market, timeframe, index) {
-  const price = market.price;
-  const bias = ((market.seed + index * 19) % 36) - 12;
-  const ma50 = price * (1 + (bias + 6) / 1000);
-  const ma100 = price * (1 + bias / 1200);
-  const ma200 = price * (1 + (bias - 8) / 1400);
-  const rsi = Math.round(45 + ((market.seed + index * 11) % 28));
-  const score = Math.round((price > ma50 ? 18 : 6) + (ma50 > ma100 ? 18 : 8) + (ma100 > ma200 ? 18 : 8) + Math.min(28, Math.abs(rsi - 50) + 12) + (timeframe === "4h" ? 14 : 10));
-  return {
-    signal: score >= 62 ? "LONG" : "SHORT",
-    ma50,
-    ma100,
-    ma200,
-    rsi,
-    score
+    signal: "NO_TRADE",
+    ma50: market.price,
+    ma100: market.price,
+    ma200: market.price,
+    rsi: 50,
+    score: 0
   };
 }
 
@@ -547,6 +521,18 @@ function formatPrice(value) {
 
 function formatUsd(value) {
   return `${Number(value || 0) >= 0 ? "+" : "-"}$${Math.abs(Number(value || 0)).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
+
+function formatPercent(value) {
+  const number = Number(value || 0);
+  return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function formatUpdated(value) {
+  if (!value) return "Waiting for CMC";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
 }
 
 function signalTextStyle(signal) {
