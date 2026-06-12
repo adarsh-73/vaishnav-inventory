@@ -1,4 +1,17 @@
-import { Link } from "react-router-dom";
+import { NavLink } from "react-router-dom";
+
+const navItems = [
+  { to: "/", icon: "D", label: "Dashboard" },
+  { to: "/billing", icon: "B", label: "Billing" },
+  { to: "/products", icon: "P", label: "Products" },
+  { to: "/old-bills", icon: "O", label: "Old Bills" },
+  { to: "/daily-book", icon: "K", label: "Daily Book" },
+  { to: "/purchase", icon: "S", label: "Purchase" },
+  { to: "/monthly-statement", icon: "M", label: "Statement" },
+  { to: "/quotation", icon: "Q", label: "Quotation" },
+  { to: "/attendance", icon: "A", label: "Attendance" },
+  { to: "/crypto-trading", icon: "C", label: "Crypto" }
+];
 
 function Sidebar() {
   return (
@@ -17,45 +30,18 @@ function Sidebar() {
       </div>
 
       <div className="sidebar-menu" style={menuListStyle}>
-        <Link to="/" style={menuStyle}>
-          📊 Dashboard
-        </Link>
-
-        <Link to="/products" style={menuStyle}>
-          🛒 Products
-        </Link>
-
-        <Link to="/purchase" style={menuStyle}>
-          📦 Purchase
-        </Link>
-
-        <Link to="/quotation" style={menuStyle}>
-          🧾 Quotation
-        </Link>
-
-        <Link to="/billing" style={menuStyle}>
-          💳 Billing
-        </Link>
-
-        <Link to="/old-bills" style={menuStyle}>
-          🗂️ Old Bills
-        </Link>
-
-        <Link to="/monthly-statement" style={menuStyle}>
-          📅 Monthly Statement
-        </Link>
-
-        <Link to="/crypto-trading" style={menuStyle}>
-          ₿ Crypto Trading
-        </Link>
-
-        <Link to="/daily-book" style={menuStyle}>
-          📒 Daily Book
-        </Link>
-
-        <Link to="/attendance" style={menuStyle}>
-          ✅ Attendance
-        </Link>
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === "/"}
+            className={({ isActive }) => `sidebar-link${isActive ? " is-active" : ""}`}
+            style={menuStyle}
+          >
+            <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+            <span className="nav-label">{item.label}</span>
+          </NavLink>
+        ))}
       </div>
     </div>
   );
