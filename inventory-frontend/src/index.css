@@ -23,6 +23,7 @@ body,
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  min-height: 100%;
 }
 
 button,
@@ -150,23 +151,42 @@ table {
 }
 
 @media (max-width: 820px) {
+  html,
+  body,
+  #root {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
   body {
     background: #f3f6fa;
+    position: static !important;
+    touch-action: pan-y;
   }
 
   .app-shell {
     display: block !important;
     min-height: 100dvh !important;
+    height: auto !important;
     padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
     overflow: visible !important;
+    touch-action: pan-y;
   }
 
   .app-content {
     width: 100% !important;
     min-width: 0 !important;
+    height: auto !important;
+    min-height: calc(100dvh - 76px) !important;
     padding-top: 76px !important;
     padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)) !important;
-    overflow: visible !important;
+    overflow-x: clip !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   .app-sidebar {
@@ -183,6 +203,7 @@ table {
     background: #071635 !important;
     box-shadow: 0 10px 30px rgba(2, 6, 23, 0.24) !important;
     border-right: 0 !important;
+    pointer-events: none !important;
   }
 
   .sidebar-brand {
@@ -191,6 +212,7 @@ table {
     margin: 0 !important;
     gap: 9px !important;
     border-bottom: 0 !important;
+    pointer-events: auto !important;
   }
 
   .sidebar-menu {
@@ -210,6 +232,7 @@ table {
     box-shadow: 0 -10px 28px rgba(2, 6, 23, 0.22) !important;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    pointer-events: auto !important;
   }
 
   .sidebar-menu::-webkit-scrollbar {
