@@ -158,12 +158,15 @@ table {
     display: block !important;
     min-height: 100dvh !important;
     padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
+    overflow: visible !important;
   }
 
   .app-content {
     width: 100% !important;
     min-width: 0 !important;
     padding-top: 76px !important;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)) !important;
+    overflow: visible !important;
   }
 
   .app-sidebar {
@@ -275,7 +278,7 @@ table {
   .app-content main,
   .app-content section {
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .app-content > div[style] {
@@ -283,22 +286,13 @@ table {
   }
 
   form[style],
-  div[style*="grid"],
   section[style] {
     max-width: 100%;
   }
 
-  .app-content form[style] {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-  }
-
-  .app-content div[style*="grid-template-columns"] {
-    grid-template-columns: 1fr !important;
-  }
-
   .app-content div[style*="display: flex"],
-  .app-content form[style*="display: flex"] {
+  .app-content form[style*="display: flex"],
+  .app-content section[style*="display: flex"] {
     flex-wrap: wrap !important;
   }
 
@@ -341,7 +335,7 @@ table {
   table {
     min-width: 0 !important;
     width: 100% !important;
-    table-layout: fixed;
+    table-layout: auto;
     font-size: 12px;
   }
 
