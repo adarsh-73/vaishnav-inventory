@@ -126,8 +126,8 @@ public class CryptoTradingService {
                 timeframe("4h", price, change7d, 2)
         );
         long longFrames = timeframes.stream().filter(tf -> "LONG".equals(tf.get("signal"))).count();
-        long shortFrames = timeframes.size() - longFrames;
-        String technicalSignal = longFrames == shortFrames ? "NO_TRADE" : longFrames > shortFrames ? "LONG" : "SHORT";
+        long shortFrames = timeframes.stream().filter(tf -> "SHORT".equals(tf.get("signal"))).count();
+        String technicalSignal = !liveCmc || longFrames == shortFrames ? "NO_TRADE" : longFrames > shortFrames ? "LONG" : "SHORT";
         double momentumScore = 50 + change1h * 8 + change24h * 2.2 + change7d * 0.65;
         int indicatorBullish = liveCmc
                 ? (int) Math.round(Math.max(18, Math.min(82, momentumScore)))
@@ -138,16 +138,19 @@ public class CryptoTradingService {
                 ? (int) Math.round(Math.max(45, Math.min(92, 55 + Math.log10(Math.max(1, volume24h)) * 3.2)))
                 : 50;
 
-        List<Map<String, Object>> aiVotes = AI_ENGINES.stream().map(ai -> aiVote(ai, symbol, technicalSignal, technicalScore)).toList();
+        List<Map<String, Object>> aiVotes = liveCmc
+                ? AI_ENGINES.stream().map(ai -> aiVote(ai, symbol, technicalSignal, technicalScore)).toList()
+                : AI_ENGINES.stream().map(ai -> noTradeAiVote(ai)).toList();
         long longVotes = aiVotes.stream().filter(vote -> "LONG".equals(vote.get("signal"))).count();
-        long shortVotes = aiVotes.size() - longVotes;
-        String finalSignal = longVotes >= shortVotes ? "LONG" : "SHORT";
+        long shortVotes = aiVotes.stream().filter(vote -> "SHORT".equals(vote.get("signal"))).count();
+        String finalSignal = !liveCmc || longVotes == shortVotes ? "NO_TRADE" : longVotes > shortVotes ? "LONG" : "SHORT";
         long alignedFrames = timeframes.stream().filter(tf -> finalSignal.equals(tf.get("signal"))).count();
         double confidence = aiVotes.stream()
                 .filter(vote -> finalSignal.equals(vote.get("signal")))
                 .mapToDouble(vote -> asDouble(vote.get("confidence")))
                 .average()
                 .orElse(0);
+        if (!liveCmc || "NO_TRADE".equals(finalSignal)) confidence = 0;
         double riskReward = 2.05;
         double stopDistance = atr * 0.82;
         double takeDistance = stopDistance * riskReward;
@@ -168,7 +171,7 @@ public class CryptoTradingService {
         Map<String, Object> signal = new LinkedHashMap<>();
         signal.put("symbol", symbol);
         signal.put("finalSignal", allowed ? finalSignal : "NO_TRADE");
-        signal.put("rawSignal", finalSignal);
+        signal.put("rawSignal", liveCmc ? finalSignal : "NO_TRADE");
         signal.put("allowed", allowed);
         signal.put("confidence", Math.round(confidence));
         signal.put("finalScore", finalScore);
@@ -188,7 +191,7 @@ public class CryptoTradingService {
         signal.put("positionSize", 1000 / entry);
         signal.put("timeframes", timeframes);
         signal.put("aiVotes", aiVotes);
-        signal.put("aiConsensus", "LONG=" + (longVotes * 100 / AI_ENGINES.size()) + "% SHORT=" + (shortVotes * 100 / AI_ENGINES.size()) + "%");
+        signal.put("aiConsensus", liveCmc ? "LONG=" + (longVotes * 100 / AI_ENGINES.size()) + "% SHORT=" + (shortVotes * 100 / AI_ENGINES.size()) + "%" : "LONG=0% SHORT=0%");
         signal.put("bestAi", aiVotes.get(seed % aiVotes.size()).get("ai"));
         signal.put("indicatorSummary", Map.of("total", INDICATOR_COUNT, "bullish", indicatorBullish, "bearish", INDICATOR_COUNT - indicatorBullish));
         signal.put("technicalSummary", technicalSignal + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | volumeScore=" + volumeScore + " | RR=" + riskReward);
@@ -244,7 +247,8 @@ public class CryptoTradingService {
         } catch (Exception error) {
             prices.replaceAll((symbol, oldValue) -> {
                 Map<String, Object> value = fallbackPrice(symbol);
-                value.put("warning", "CoinMarketCap fetch failed, fallback price used");
+                value.put("source", "FALLBACK_CMC_FETCH_FAILED");
+                value.put("warning", "CoinMarketCap fetch failed. Check COINMARKETCAP_API_KEY in Render and redeploy backend.");
                 return value;
             });
             return prices;
@@ -299,6 +303,16 @@ public class CryptoTradingService {
                 "confidence", confidence,
                 "entryQuality", confidence >= 78 ? "GOOD" : "WAIT",
                 "reason", signal + " from clean indicator summary, volume and MA confirmation"
+        );
+    }
+
+    private Map<String, Object> noTradeAiVote(String ai) {
+        return Map.of(
+                "ai", ai,
+                "signal", "NO_TRADE",
+                "confidence", 0,
+                "entryQuality", "WAIT",
+                "reason", "CoinMarketCap live data unavailable"
         );
     }
 
