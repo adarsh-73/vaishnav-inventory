@@ -425,36 +425,16 @@ table {
   }
 
   .invoice-print-sheet {
-    width: 100% !important;
-    max-width: 100% !important;
-    min-width: 0 !important;
+    width: 210mm !important;
+    min-width: 210mm !important;
+    max-width: none !important;
+    min-height: 297mm !important;
     height: auto !important;
-    min-height: auto !important;
-    padding: 12px !important;
-    overflow: hidden !important;
-  }
-
-  .invoice-print-sheet table {
-    table-layout: auto;
-    font-size: 10px;
-  }
-
-  .invoice-print-sheet th,
-  .invoice-print-sheet td {
-    padding: 6px 4px !important;
-  }
-
-  .invoice-print-sheet h1 {
-    font-size: 28px !important;
-  }
-
-  .invoice-print-sheet h2 {
-    font-size: 14px !important;
-  }
-
-  .invoice-print-sheet img {
-    max-width: 100% !important;
-    height: auto !important;
+    overflow: visible !important;
+    transform-origin: top left;
+    zoom: 0.46;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
 
   #old-bill-print-sheet {
