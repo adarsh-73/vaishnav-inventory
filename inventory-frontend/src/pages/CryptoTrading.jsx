@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../utils/api";
 
 const MARKETS = {
-  BTC: { name: "Bitcoin", price: 104250, atr15: 420, atr1h: 980, atr4h: 1850, seed: 71 },
-  ETH: { name: "Ethereum", price: 3620, atr15: 18, atr1h: 46, atr4h: 112, seed: 47 },
-  SOL: { name: "Solana", price: 168, atr15: 1.2, atr1h: 3.4, atr4h: 7.8, seed: 59 }
+  BTC: { name: "Bitcoin", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 71 },
+  ETH: { name: "Ethereum", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 47 },
+  SOL: { name: "Solana", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 59 }
 };
 
 const AI_ENGINES = ["ChatGPT", "Gemini", "DeepSeek", "Claude", "Local ML", "Risk AI"];
@@ -145,6 +145,13 @@ function CryptoTrading() {
         <strong>{cashEnabled ? "Cash Enabled:" : "Cash Disabled:"}</strong> {cashEnabled ? "Binance connect/testnet panel active hai, lekin live real-money order backend vault aur final approval ke bina locked rahega." : "AI paper trades hi record honge. Is mode me tum dekh sakte ho AI ne din me kitne trade liye aur profit/loss kya raha."}
       </section>
 
+      <section style={intelligenceGrid}>
+        <Info label="Whale Watch" value={dashboard.intelligence?.whaleTracker || "Waiting"} />
+        <Info label="News Risk" value={dashboard.intelligence?.newsRisk || "Waiting"} />
+        <Info label="Fake News Guard" value={dashboard.intelligence?.fakeNewsFilter || "Backend data ka wait"} />
+        <Info label="Trade Rule" value={dashboard.intelligence?.rule || "No real-money auto trade until all filters pass"} />
+      </section>
+
       <div style={coinGrid}>
         {Object.values(dashboard.plans).map((plan) => (
           <button
@@ -158,6 +165,12 @@ function CryptoTrading() {
               <span style={plan.allowed ? readyPill : blockedPill}>{plan.allowed ? "READY" : "WAIT"}</span>
             </div>
             <div style={signalTextStyle(plan.direction)}>{plan.direction}</div>
+            <div style={probabilityBar}>
+              <span style={{ ...probabilityFill, width: `${plan.longChance || 0}%`, background: "#16a34a" }} />
+              <span style={{ ...probabilityFill, width: `${plan.shortChance || 0}%`, background: "#dc2626" }} />
+              <span style={{ ...probabilityFill, width: `${plan.noTradeChance || 0}%`, background: "#ca8a04" }} />
+            </div>
+            <div style={coinMeta}>Long {formatPercentPlain(plan.longChance)} | Short {formatPercentPlain(plan.shortChance)} | No Trade {formatPercentPlain(plan.noTradeChance)}</div>
             <div style={coinMeta}>Price {formatPrice(plan.entry)} | Source {plan.priceSource || "CMC"}</div>
             <div style={coinMeta}>CMC 1h {formatPercent(plan.percentChange1h)} | 24h {formatPercent(plan.percentChange24h)} | 7d {formatPercent(plan.percentChange7d)}</div>
             <div style={coinMeta}>Entry {formatPrice(plan.entry)} | SL {formatPrice(plan.stopLoss)} | Book {formatPrice(plan.takeProfit)}</div>
@@ -189,6 +202,9 @@ function CryptoTrading() {
           </div>
           <div style={orderGrid}>
             <Info label="Side" value={selectedPlan.direction} strong />
+            <Info label="Long Chance" value={formatPercentPlain(selectedPlan.longChance)} good />
+            <Info label="Short Chance" value={formatPercentPlain(selectedPlan.shortChance)} danger />
+            <Info label="No Trade" value={formatPercentPlain(selectedPlan.noTradeChance)} />
             <Info label="Entry" value={formatPrice(selectedPlan.entry)} />
             <Info label="Stop Loss" value={formatPrice(selectedPlan.stopLoss)} danger />
             <Info label="Book Profit" value={formatPrice(selectedPlan.takeProfit)} good />
@@ -196,6 +212,8 @@ function CryptoTrading() {
             <Info label="Confidence" value={`${selectedPlan.confidence}%`} />
             <Info label="Price Source" value={selectedPlan.priceSource || "CMC"} />
             <Info label="CMC 24h" value={formatPercent(selectedPlan.percentChange24h)} />
+            <Info label="RSI / MA" value={`${selectedPlan.indicators?.rsi14 || "-"} / ${selectedPlan.indicators?.maTrend || "-"}`} />
+            <Info label="MACD / BB" value={`${selectedPlan.indicators?.macdSignal || "-"} / ${selectedPlan.indicators?.bollingerPosition || "-"}`} />
             <Info label="Updated" value={formatUpdated(selectedPlan.lastUpdated)} />
             <Info label="Position Size" value={`${selectedPlan.positionSize.toFixed(4)} ${selectedPlan.symbol}`} />
             <Info label="Risk Amount" value={formatUsd(selectedPlan.riskAmount)} danger />
@@ -326,6 +344,12 @@ function buildDashboard(settings) {
   return {
     plans,
     binance: { connected: false, vaultMode: "LOCAL_SIMULATION", liveTradingLocked: true },
+    intelligence: {
+      whaleTracker: "Waiting for backend",
+      newsRisk: "Waiting",
+      fakeNewsFilter: "Backend/CoinMarketCap data ka wait",
+      rule: "No fake local trade"
+    },
     portfolio: {
       best,
       monthPnl,
@@ -381,6 +405,12 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
       entry: Number(signal.entry || fallbackPlan.entry),
       priceSource: signal.priceSource || fallbackPlan.priceSource || "FALLBACK",
       marketWarning: signal.marketWarning || "",
+      longChance: Number(signal.aiDecision?.longChance || 0),
+      shortChance: Number(signal.aiDecision?.shortChance || 0),
+      noTradeChance: Number(signal.aiDecision?.noTradeChance || 100),
+      aiReason: signal.aiDecision?.reason || "",
+      aiSource: signal.aiDecision?.source || "",
+      indicators: signal.technicalIndicators || {},
       percentChange1h: Number(signal.percentChange1h || 0),
       percentChange24h: Number(signal.percentChange24h || 0),
       percentChange7d: Number(signal.percentChange7d || 0),
@@ -417,6 +447,7 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
     openTrades: serverDashboard.openTrades || [],
     safetyRules: serverDashboard.safetyRules || [],
     binance: serverDashboard.binance || {},
+    intelligence: serverDashboard.intelligence || fallback.intelligence,
     portfolio: {
       best,
       monthPnl: Number(report.monthPnl ?? report.virtualPnl ?? 0),
@@ -450,14 +481,13 @@ function buildPlan(symbol, settings) {
   }));
   const direction = "NO_TRADE";
   const confidence = 0;
-  const atr = Math.max(market.price * 0.01, 1);
   const entry = market.price;
-  const stopDistance = atr;
+  const stopDistance = 0;
   const stopLoss = entry - stopDistance;
   const takeProfit = entry + stopDistance * 2;
   const trailingStop = entry;
   const riskAmount = Number(settings.capital || 0) * Number(settings.riskPercent || 0) / 100;
-  const positionUsdt = Math.min(Number(settings.capital || 0) * Number(settings.maxLeverage || 1), riskAmount / (stopDistance / entry || 1));
+  const positionUsdt = entry > 0 ? Math.min(Number(settings.capital || 0) * Number(settings.maxLeverage || 1), riskAmount / (stopDistance / entry || 1)) : 0;
   const positionSize = Math.max(0, positionUsdt / entry);
   const rules = [
     { name: "Backend dashboard load hona chahiye", pass: false },
@@ -479,6 +509,12 @@ function buildPlan(symbol, settings) {
     entry,
     priceSource: "WAITING_FOR_BACKEND",
     marketWarning: "Backend/CoinMarketCap live data load nahi hua. Fake trade signal disabled hai.",
+    longChance: 0,
+    shortChance: 0,
+    noTradeChance: 100,
+    aiReason: "Waiting for backend AI payload",
+    aiSource: "WAITING",
+    indicators: {},
     percentChange1h: 0,
     percentChange24h: 0,
     percentChange7d: 0,
@@ -528,6 +564,10 @@ function formatPercent(value) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
 }
 
+function formatPercentPlain(value) {
+  return `${Number(value || 0).toFixed(0)}%`;
+}
+
 function formatUpdated(value) {
   if (!value) return "Waiting for CMC";
   const date = new Date(value);
@@ -560,7 +600,10 @@ const activeToggle = { ...toggleBtn, background: "#e0f2fe", color: "#075985", bo
 const goodToggle = { ...toggleBtn, background: "#dcfce7", color: "#166534", borderColor: "#86efac" };
 const dangerToggle = { ...toggleBtn, background: "#fee2e2", color: "#991b1b", borderColor: "#fca5a5" };
 const noticeStyle = { background: "#fffbeb", border: "1px solid #fcd34d", color: "#92400e", padding: "12px 14px", borderRadius: "8px", marginBottom: "18px", fontSize: "13px" };
+const intelligenceGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "12px", marginBottom: "18px" };
 const coinGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "14px", marginBottom: "18px" };
+const probabilityBar = { display: "flex", height: "8px", overflow: "hidden", borderRadius: "999px", background: "#e5e7eb", margin: "8px 0 6px" };
+const probabilityFill = { display: "block", height: "100%" };
 const coinCardBase = { textAlign: "left", borderRadius: "8px", padding: "16px", cursor: "pointer", border: "1px solid #e2e8f0", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)" };
 const coinCard = (plan) => ({ ...coinCardBase, background: "#ffffff", borderTop: `4px solid ${plan.direction === "LONG" ? "#0f766e" : plan.direction === "SHORT" ? "#b91c1c" : "#92400e"}` });
 const selectedCoinCard = (plan) => ({ ...coinCard(plan), outline: "3px solid #f9d989", background: "#f8fafc" });
