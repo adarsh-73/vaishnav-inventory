@@ -63,6 +63,8 @@ function CryptoTrading() {
 
   useEffect(() => {
     loadDashboard();
+    const timer = setInterval(loadDashboard, 30000);
+    return () => clearInterval(timer);
   }, []);
 
   const runPaperScan = async () => {
@@ -164,6 +166,21 @@ function CryptoTrading() {
         <Info label="Trade Rule" value={dashboard.intelligence?.rule || "No real-money auto trade until all filters pass"} />
       </section>
 
+      <section style={strategyPanel}>
+        <div style={panelHeaderCompact}>
+          <h2 style={panelTitle}>AI Trade Checklist</h2>
+          <span style={pillStyle}>A to Z decision flow</span>
+        </div>
+        <div style={strategyGrid}>
+          <Info label="Price" value="CoinMarketCap live BTC/ETH/SOL" />
+          <Info label="Indicators" value="MA 50/100/200, EMA, RSI, MACD, BB, ATR, VWAP, S/R" />
+          <Info label="Futures" value="Funding, open interest, long/short ratio, volume spike" />
+          <Info label="Whale Proxy" value="Large volume + Binance flow now, real whale API keys next" />
+          <Info label="Macro" value="S&P500/SPY, dollar/UUP, CPI/Fed/geopolitical risk filter" />
+          <Info label="Entry Rule" value="75%+ score, 2+ timeframes, RR 1:2+, no high risk" />
+        </div>
+      </section>
+
       <div style={coinGrid}>
         {Object.values(dashboard.plans).map((plan) => (
           <button
@@ -206,6 +223,50 @@ function CryptoTrading() {
         <Metric label="Binance Vault" value={binanceStatus.connected ? "Connected" : "Not Connected"} accent={binanceStatus.connected ? "#15803d" : "#92400e"} />
         <Metric label="Auto Status" value={cashEnabled && autoTrade && binanceStatus.connected ? "Testnet Armed" : paperEnabled ? "Paper Only" : "Manual"} accent={cashEnabled && autoTrade && binanceStatus.connected ? "#b91c1c" : "#92400e"} />
       </div>
+
+      <section style={panelStyle}>
+        <div style={panelHeader}>
+          <h2 style={panelTitle}>Live Paper Trades</h2>
+          <span style={dashboard.liveTrades?.length ? safePill : warnPill}>{dashboard.liveTrades?.length ? `${dashboard.liveTrades.length} running` : "No running trade"}</span>
+        </div>
+        <div style={tableWrap}>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Coin</th>
+                <th style={thStyle}>Side</th>
+                <th style={thStyle}>Entry</th>
+                <th style={thStyle}>Current</th>
+                <th style={thStyle}>Live PnL</th>
+                <th style={thStyle}>SL</th>
+                <th style={thStyle}>Book</th>
+                <th style={thStyle}>Target Left</th>
+                <th style={thStyle}>AI Score</th>
+                <th style={thStyle}>Why Trade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dashboard.liveTrades?.map((trade) => (
+                <tr key={`live-${trade.id}`}>
+                  <td style={tdStyle}>{String(trade.symbol || "").replace("USDT", "")}</td>
+                  <td style={trade.side === "LONG" ? longTd : shortTd}>{trade.side}</td>
+                  <td style={tdStyle}>{formatPrice(trade.entryPrice)}</td>
+                  <td style={tdStyle}>{formatPrice(trade.currentPrice)}</td>
+                  <td style={Number(trade.unrealizedPnl || 0) >= 0 ? profitTd : lossTd}>{formatUsd(trade.unrealizedPnl)} ({formatPercent(trade.unrealizedPnlPercent)})</td>
+                  <td style={tdStyle}>{formatPrice(trade.stopLoss)} ({formatPercentPlain(trade.stopDistancePercent)})</td>
+                  <td style={tdStyle}>{formatPrice(trade.takeProfit)}</td>
+                  <td style={tdStyle}>{formatPercentPlain(trade.targetDistancePercent)}</td>
+                  <td style={tdStyle}>{Math.round(Number(trade.finalScore || trade.confidence || 0))}%</td>
+                  <td style={reasonTd}>{trade.aiConsensus || trade.technicalSummary || "AI consensus running"}</td>
+                </tr>
+              ))}
+              {(!dashboard.liveTrades || dashboard.liveTrades.length === 0) && (
+                <tr><td style={emptyTd} colSpan="10">Abhi koi running paper trade nahi hai. Trade tabhi dikhega jab AI paper scan entry lega.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div style={mainGrid}>
         <section style={panelStyle}>
@@ -356,6 +417,8 @@ function buildDashboard(settings) {
 
   return {
     plans,
+    liveTrades: [],
+    recentTrades: [],
     binance: { connected: false, vaultMode: "LOCAL_SIMULATION", liveTradingLocked: true },
     intelligence: {
       whaleTracker: "Waiting for backend",
@@ -456,6 +519,7 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
   const best = Object.values(plans).sort((a, b) => Number(b.allowed) - Number(a.allowed) || b.confidence - a.confidence)[0] || fallback.portfolio.best;
   return {
     plans,
+    liveTrades: serverDashboard.liveTrades || [],
     recentTrades: serverDashboard.recentTrades || [],
     openTrades: serverDashboard.openTrades || [],
     safetyRules: serverDashboard.safetyRules || [],
@@ -615,6 +679,9 @@ const goodToggle = { ...toggleBtn, background: "#dcfce7", color: "#166534", bord
 const dangerToggle = { ...toggleBtn, background: "#fee2e2", color: "#991b1b", borderColor: "#fca5a5" };
 const noticeStyle = { background: "#fffbeb", border: "1px solid #fcd34d", color: "#92400e", padding: "12px 14px", borderRadius: "8px", marginBottom: "18px", fontSize: "13px" };
 const intelligenceGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "12px", marginBottom: "18px" };
+const strategyPanel = { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", marginBottom: "18px", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", overflow: "hidden" };
+const panelHeaderCompact = { padding: "13px 16px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" };
+const strategyGrid = { padding: "14px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" };
 const coinGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "14px", marginBottom: "18px" };
 const probabilityBar = { display: "flex", height: "8px", overflow: "hidden", borderRadius: "999px", background: "#e5e7eb", margin: "8px 0 6px" };
 const probabilityFill = { display: "block", height: "100%" };
@@ -642,8 +709,10 @@ const pillStyle = { background: "#eef2ff", color: "#0f2963", borderRadius: "999p
 const safePill = { ...pillStyle, background: "#dcfce7", color: "#166534" };
 const warnPill = { ...pillStyle, background: "#fef3c7", color: "#92400e" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
+const tableWrap = { width: "100%", overflowX: "auto" };
 const thStyle = { textAlign: "left", padding: "11px 14px", background: "#f8fafc", color: "#475569", fontSize: "12px", textTransform: "uppercase", borderBottom: "1px solid #e2e8f0" };
 const tdStyle = { padding: "12px 14px", borderBottom: "1px solid #edf2f7", color: "#334155", fontSize: "13px", verticalAlign: "top" };
+const reasonTd = { ...tdStyle, minWidth: "260px", maxWidth: "420px", lineHeight: 1.35 };
 const emptyTd = { ...tdStyle, textAlign: "center", color: "#94a3b8" };
 const longTd = { ...tdStyle, color: "#0f766e", fontWeight: "900" };
 const shortTd = { ...tdStyle, color: "#b91c1c", fontWeight: "900" };

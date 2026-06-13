@@ -69,10 +69,58 @@ public class CryptoTradingService {
         response.put("intelligence", buildMarketIntelligence(marketPrices, futuresIntel, signals, macroStatus));
         response.put("report", report);
         response.put("openTrades", paperTradeRepository.findByStatus("RUNNING"));
+        response.put("liveTrades", buildLiveTrades(marketPrices));
         response.put("recentTrades", trades.stream().sorted(Comparator.comparing(CryptoPaperTrade::getId).reversed()).limit(25).toList());
         response.put("safetyRules", safetyRules());
         response.put("binance", cryptoExchangeService.testnetClientStatus());
         return response;
+    }
+
+    private List<Map<String, Object>> buildLiveTrades(Map<String, Map<String, Object>> marketPrices) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (CryptoPaperTrade trade : paperTradeRepository.findByStatus("RUNNING")) {
+            Map<String, Object> market = marketPrices.getOrDefault(trade.getSymbol(), fallbackPrice(trade.getSymbol()));
+            double currentPrice = asDouble(market.get("price"));
+            double entry = trade.getEntryPrice() == null ? currentPrice : trade.getEntryPrice();
+            double quantity = trade.getQuantity() == null ? 0 : trade.getQuantity();
+            double direction = "SHORT".equals(trade.getSide()) ? -1 : 1;
+            double unrealizedPnl = currentPrice > 0 ? (currentPrice - entry) * quantity * direction : 0;
+            double pnlPercent = entry > 0 ? ((currentPrice - entry) / entry) * 100 * direction : 0;
+            double stopDistancePercent = currentPrice > 0
+                    ? Math.abs(currentPrice - asDouble(trade.getStopLoss())) * 100 / currentPrice
+                    : 0;
+            double targetDistancePercent = currentPrice > 0
+                    ? Math.abs(asDouble(trade.getTakeProfit()) - currentPrice) * 100 / currentPrice
+                    : 0;
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", trade.getId());
+            row.put("symbol", trade.getSymbol());
+            row.put("side", trade.getSide());
+            row.put("status", trade.getStatus());
+            row.put("timeframe", trade.getTimeframe());
+            row.put("entryPrice", entry);
+            row.put("currentPrice", currentPrice);
+            row.put("stopLoss", trade.getStopLoss());
+            row.put("takeProfit", trade.getTakeProfit());
+            row.put("trailingStop", trade.getTrailingStop());
+            row.put("quantity", quantity);
+            row.put("unrealizedPnl", round(unrealizedPnl));
+            row.put("unrealizedPnlPercent", round(pnlPercent));
+            row.put("stopDistancePercent", round(stopDistancePercent));
+            row.put("targetDistancePercent", round(targetDistancePercent));
+            row.put("confidence", trade.getConfidence());
+            row.put("finalScore", trade.getFinalScore());
+            row.put("riskReward", trade.getRiskReward());
+            row.put("aiConsensus", trade.getAiConsensus());
+            row.put("technicalSummary", trade.getTechnicalSummary());
+            row.put("newsRisk", trade.getNewsRisk());
+            row.put("priceSource", market.get("source"));
+            row.put("lastUpdated", market.get("lastUpdated"));
+            row.put("openedAt", trade.getOpenedAt());
+            rows.add(row);
+        }
+        return rows;
     }
 
     private Map<String, Object> buildMarketIntelligence(Map<String, Map<String, Object>> marketPrices,
