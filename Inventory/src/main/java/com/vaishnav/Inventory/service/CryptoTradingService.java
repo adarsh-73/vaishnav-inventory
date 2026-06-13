@@ -25,11 +25,14 @@ public class CryptoTradingService {
     private static final int MAX_DAILY_PAPER_TRADES = 5;
     private static final long CMC_CACHE_SECONDS = 60;
     private static final long FUTURES_INTEL_CACHE_SECONDS = 60;
+    private static final long EXTERNAL_FEED_CACHE_SECONDS = 300;
 
     private volatile Map<String, Map<String, Object>> cachedMarketPrices;
     private volatile Instant cachedMarketPricesAt;
     private volatile Map<String, Map<String, Object>> cachedFuturesIntel;
     private volatile Instant cachedFuturesIntelAt;
+    private volatile Map<String, Object> cachedExternalFeeds;
+    private volatile Instant cachedExternalFeedsAt;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -53,7 +56,8 @@ public class CryptoTradingService {
         Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
         Map<String, Map<String, Object>> futuresIntel = fetchFuturesIntelligence();
         Map<String, Object> macroStatus = fetchMacroStatus();
-        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel, macroStatus)).toList();
+        Map<String, Object> externalFeeds = fetchExternalFeeds(marketPrices, futuresIntel, macroStatus);
+        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel, macroStatus, externalFeeds)).toList();
         cleanupBadFallbackTrades(marketPrices);
         evaluateRunningTrades(marketPrices, signals);
         List<CryptoPaperTrade> trades = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(40));
@@ -66,7 +70,7 @@ public class CryptoTradingService {
         response.put("todayTradeSlotsLeft", Math.max(0, MAX_DAILY_PAPER_TRADES - ((Number) report.get("todayTrades")).intValue()));
         response.put("marketDataSource", marketPrices.values().stream().anyMatch(price -> "COINMARKETCAP".equals(price.get("source"))) ? "COINMARKETCAP" : "FALLBACK");
         response.put("symbols", signals);
-        response.put("intelligence", buildMarketIntelligence(marketPrices, futuresIntel, signals, macroStatus));
+        response.put("intelligence", buildMarketIntelligence(marketPrices, futuresIntel, signals, macroStatus, externalFeeds));
         response.put("report", report);
         response.put("openTrades", paperTradeRepository.findByStatus("RUNNING"));
         response.put("liveTrades", buildLiveTrades(marketPrices));
@@ -126,7 +130,8 @@ public class CryptoTradingService {
     private Map<String, Object> buildMarketIntelligence(Map<String, Map<String, Object>> marketPrices,
                                                         Map<String, Map<String, Object>> futuresIntel,
                                                         List<Map<String, Object>> signals,
-                                                        Map<String, Object> macroStatus) {
+                                                        Map<String, Object> macroStatus,
+                                                        Map<String, Object> externalFeeds) {
         double totalVolume = marketPrices.values().stream()
                 .mapToDouble(price -> asDouble(price.get("volume24h")))
                 .sum();
@@ -141,13 +146,16 @@ public class CryptoTradingService {
                 : "NEEDS_WHALE_API");
         intelligence.put("futuresData", connectedFutures + "/" + SYMBOLS.size() + " Binance futures feeds connected");
         intelligence.put("newsRisk", highRiskSignals > 0 ? "HIGH" : "NORMAL");
-        intelligence.put("fakeNewsFilter", "Only trade after verified-source + price/volume confirmation. Social/news API not connected yet.");
-        intelligence.put("newsFeed", hasEnv("CRYPTOPANIC_API_KEY") ? "CRYPTOPANIC_READY" : "Add CRYPTOPANIC_API_KEY for verified news scoring.");
-        intelligence.put("whaleFeed", hasEnv("WHALE_ALERT_API_KEY") || hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY")
-                ? "WHALE_API_READY"
-                : "Add WHALE_ALERT_API_KEY / GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY for real wallet and exchange-flow tracking.");
+        intelligence.put("fakeNewsFilter", "Trade only after verified-source + price/volume confirmation. Telegram/social claims are not trusted alone.");
+        intelligence.put("newsFeed", nestedValue(externalFeeds, "news", "status"));
+        intelligence.put("whaleFeed", nestedValue(externalFeeds, "whales", "status"));
+        intelligence.put("etfFeed", nestedValue(externalFeeds, "etf", "status"));
         intelligence.put("macro", macroStatus);
-        intelligence.put("topWhales", buildWhaleStatus());
+        intelligence.put("topWhales", nestedValue(externalFeeds, "whales", "items"));
+        intelligence.put("verifiedNews", nestedValue(externalFeeds, "news", "items"));
+        intelligence.put("etfFlows", nestedValue(externalFeeds, "etf", "items"));
+        intelligence.put("smartMoneyScore", externalFeeds.get("smartMoneyScore"));
+        intelligence.put("externalRisk", externalFeeds.get("externalRisk"));
         intelligence.put("symbols", futuresIntel);
         intelligence.put("rule", "Trade only when CMC + indicators + futures/whale proxy + news risk filters agree.");
         return intelligence;
@@ -203,12 +211,194 @@ public class CryptoTradingService {
         ));
     }
 
+    private Map<String, Object> fetchExternalFeeds(Map<String, Map<String, Object>> marketPrices,
+                                                   Map<String, Map<String, Object>> futuresIntel,
+                                                   Map<String, Object> macroStatus) {
+        Map<String, Object> cached = cachedExternalFeeds;
+        if (cached != null
+                && cachedExternalFeedsAt != null
+                && Instant.now().minusSeconds(EXTERNAL_FEED_CACHE_SECONDS).isBefore(cachedExternalFeedsAt)) {
+            return cached;
+        }
+
+        Map<String, Object> news = fetchCryptoPanicNews();
+        Map<String, Object> whales = buildWhaleFlowFeed(marketPrices, futuresIntel);
+        Map<String, Object> etf = fetchEtfProxyFeed();
+        int smartMoneyScore = calculateSmartMoneyScore(whales, etf, news, macroStatus);
+        String externalRisk = smartMoneyScore <= 38 || "HIGH".equals(news.get("risk")) ? "HIGH"
+                : smartMoneyScore <= 55 || "MEDIUM".equals(news.get("risk")) ? "MEDIUM"
+                : "NORMAL";
+
+        Map<String, Object> feeds = new LinkedHashMap<>();
+        feeds.put("news", news);
+        feeds.put("whales", whales);
+        feeds.put("etf", etf);
+        feeds.put("smartMoneyScore", smartMoneyScore);
+        feeds.put("externalRisk", externalRisk);
+        feeds.put("sourceNote", "Verified APIs only. Telegram screenshots are not used as truth.");
+        cachedExternalFeeds = feeds;
+        cachedExternalFeedsAt = Instant.now();
+        return feeds;
+    }
+
+    private Map<String, Object> fetchCryptoPanicNews() {
+        Map<String, Object> feed = new LinkedHashMap<>();
+        String apiKey = System.getenv("CRYPTOPANIC_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            feed.put("status", "API_KEY_REQUIRED");
+            feed.put("risk", "UNKNOWN");
+            feed.put("items", List.of(Map.of(
+                    "title", "Add CRYPTOPANIC_API_KEY for verified crypto news.",
+                    "source", "SYSTEM",
+                    "sentiment", "WAITING"
+            )));
+            return feed;
+        }
+
+        try {
+            Map<?, ?> response = new RestTemplate().getForObject(
+                    "https://cryptopanic.com/api/v1/posts/?auth_token=" + apiKey + "&currencies=BTC,ETH,SOL&filter=hot&public=true",
+                    Map.class
+            );
+            Object resultsObj = response == null ? null : response.get("results");
+            List<Map<String, Object>> items = new ArrayList<>();
+            int danger = 0;
+            int positive = 0;
+            if (resultsObj instanceof List<?> results) {
+                for (Object itemObj : results.stream().limit(8).toList()) {
+                    if (!(itemObj instanceof Map<?, ?> item)) continue;
+                    String title = String.valueOf(item.containsKey("title") ? item.get("title") : "");
+                    String domain = item.get("domain") == null ? "CryptoPanic" : String.valueOf(item.get("domain"));
+                    String sentiment = classifyNewsTitle(title);
+                    if ("RISK_OFF".equals(sentiment)) danger++;
+                    if ("RISK_ON".equals(sentiment)) positive++;
+                    items.add(Map.of(
+                            "title", title,
+                            "source", domain,
+                            "sentiment", sentiment,
+                            "url", String.valueOf(item.containsKey("url") ? item.get("url") : "")
+                    ));
+                }
+            }
+            feed.put("status", "CONNECTED");
+            feed.put("risk", danger >= 2 ? "HIGH" : danger > positive ? "MEDIUM" : "NORMAL");
+            feed.put("items", items);
+            feed.put("rule", "Negative macro/regulation/hack/war/liquidation news raises no-trade probability.");
+            return feed;
+        } catch (Exception error) {
+            feed.put("status", "FETCH_FAILED");
+            feed.put("risk", "UNKNOWN");
+            feed.put("items", List.of(Map.of("title", "CryptoPanic fetch failed. Check API key/quota.", "source", "SYSTEM", "sentiment", "WAITING")));
+            return feed;
+        }
+    }
+
+    private Map<String, Object> buildWhaleFlowFeed(Map<String, Map<String, Object>> marketPrices,
+                                                   Map<String, Map<String, Object>> futuresIntel) {
+        boolean providerReady = hasEnv("WHALE_ALERT_API_KEY") || hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY");
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (String symbol : SYMBOLS) {
+            Map<String, Object> market = marketPrices.getOrDefault(symbol, fallbackPrice(symbol));
+            Map<String, Object> futures = futuresIntel.getOrDefault(symbol, fallbackFuturesIntel(symbol));
+            double volume24h = asDouble(market.get("volume24h"));
+            double quoteVolume = asDouble(futures.get("quoteVolume24h"));
+            double volumeSpike = asDouble(futures.get("volumeSpike"));
+            double openInterest = asDouble(futures.get("openInterest"));
+            String direction = asDouble(futures.get("longShortRatio")) >= 1.04 ? "LONG_CROWD" : asDouble(futures.get("longShortRatio")) <= 0.96 ? "SHORT_CROWD" : "BALANCED";
+            String severity = volumeSpike >= 2.2 || quoteVolume >= 8_000_000_000D ? "HIGH" : volumeSpike >= 1.5 ? "MEDIUM" : "NORMAL";
+            items.add(Map.of(
+                    "asset", symbol.replace("USDT", ""),
+                    "flow", String.valueOf(futures.get("whaleProxy")),
+                    "direction", direction,
+                    "severity", severity,
+                    "volumeSpike", volumeSpike,
+                    "openInterest", round(openInterest),
+                    "volume24h", round(volume24h)
+            ));
+        }
+
+        Map<String, Object> feed = new LinkedHashMap<>();
+        feed.put("status", providerReady ? "PROVIDER_KEY_READY_PLUS_BINANCE_PROXY" : "BINANCE_PROXY_ONLY_ADD_WHALE_KEYS");
+        feed.put("items", items);
+        feed.put("rule", providerReady
+                ? "Provider keys detected; Binance proxy active. Provider-specific wallet/exchange-flow endpoints can be expanded by plan."
+                : "Using Binance futures large-flow proxy now. Add WHALE_ALERT_API_KEY / GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY for real wallet and exchange inflow/outflow.");
+        return feed;
+    }
+
+    private Map<String, Object> fetchEtfProxyFeed() {
+        Map<String, Object> feed = new LinkedHashMap<>();
+        String alphaKey = System.getenv("ALPHAVANTAGE_API_KEY");
+        if (alphaKey == null || alphaKey.isBlank()) {
+            feed.put("status", "API_KEY_REQUIRED");
+            feed.put("items", List.of(Map.of(
+                    "asset", "BTC/ETH/SOL ETF",
+                    "flow", "Add ALPHAVANTAGE_API_KEY for ETF/macro proxy quotes.",
+                    "signal", "WAITING"
+            )));
+            return feed;
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (String symbol : List.of("IBIT", "FBTC", "ETHA", "ETHE")) {
+            try {
+                Map<?, ?> quote = new RestTemplate().getForObject(
+                        "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=" + symbol + "&apikey=" + alphaKey,
+                        Map.class
+                );
+                double change = parsePercent(globalQuoteValue(quote, "10. change percent"));
+                String signal = change >= 1 ? "INFLOW_PROXY" : change <= -1 ? "OUTFLOW_PROXY" : "NEUTRAL";
+                items.add(Map.of(
+                        "asset", symbol,
+                        "changePercent", round(change),
+                        "signal", signal,
+                        "flow", "ETF price/volume proxy; exact daily net flow needs dedicated ETF-flow provider."
+                ));
+            } catch (Exception ignored) {
+                items.add(Map.of("asset", symbol, "signal", "FETCH_FAILED", "flow", "Check AlphaVantage quota/key."));
+            }
+        }
+        feed.put("status", "CONNECTED_PROXY");
+        feed.put("items", items);
+        feed.put("rule", "ETF proxy is used as confirmation only, not standalone entry.");
+        return feed;
+    }
+
+    private int calculateSmartMoneyScore(Map<String, Object> whales,
+                                         Map<String, Object> etf,
+                                         Map<String, Object> news,
+                                         Map<String, Object> macroStatus) {
+        int score = 62;
+        String newsRisk = String.valueOf(news.getOrDefault("risk", "UNKNOWN"));
+        String macroRisk = String.valueOf(macroStatus.getOrDefault("macroRisk", "UNKNOWN"));
+        if ("HIGH".equals(newsRisk)) score -= 22;
+        else if ("MEDIUM".equals(newsRisk)) score -= 10;
+        if ("HIGH".equals(macroRisk)) score -= 18;
+        else if ("MEDIUM".equals(macroRisk)) score -= 8;
+
+        Object whaleItemsObj = whales.get("items");
+        if (whaleItemsObj instanceof List<?> whaleItems) {
+            long high = whaleItems.stream().filter(item -> item instanceof Map<?, ?> map && "HIGH".equals(map.get("severity"))).count();
+            if (high > 0) score += 8;
+        }
+
+        Object etfItemsObj = etf.get("items");
+        if (etfItemsObj instanceof List<?> etfItems) {
+            long inflow = etfItems.stream().filter(item -> item instanceof Map<?, ?> map && "INFLOW_PROXY".equals(map.get("signal"))).count();
+            long outflow = etfItems.stream().filter(item -> item instanceof Map<?, ?> map && "OUTFLOW_PROXY".equals(map.get("signal"))).count();
+            score += (int) Math.min(10, inflow * 3);
+            score -= (int) Math.min(10, outflow * 3);
+        }
+        return Math.max(0, Math.min(100, score));
+    }
+
     public List<CryptoPaperTrade> runPaperScan() {
         List<CryptoPaperTrade> created = new ArrayList<>();
         Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
         Map<String, Map<String, Object>> futuresIntel = fetchFuturesIntelligence();
         Map<String, Object> macroStatus = fetchMacroStatus();
-        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel, macroStatus)).toList();
+        Map<String, Object> externalFeeds = fetchExternalFeeds(marketPrices, futuresIntel, macroStatus);
+        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel, macroStatus, externalFeeds)).toList();
         cleanupBadFallbackTrades(marketPrices);
         evaluateRunningTrades(marketPrices, signals);
 
@@ -371,7 +561,8 @@ public class CryptoTradingService {
     private Map<String, Object> buildSignal(String symbol,
                                             Map<String, Map<String, Object>> marketPrices,
                                             Map<String, Map<String, Object>> futuresIntel,
-                                            Map<String, Object> macroStatus) {
+                                            Map<String, Object> macroStatus,
+                                            Map<String, Object> externalFeeds) {
         int seed = Math.abs(symbol.hashCode());
         Map<String, Object> marketPrice = marketPrices.getOrDefault(symbol, fallbackPrice(symbol));
         Map<String, Object> futures = futuresIntel.getOrDefault(symbol, fallbackFuturesIntel(symbol));
@@ -390,6 +581,8 @@ public class CryptoTradingService {
                 : fallbackIndicators();
         String liquidationRisk = String.valueOf(futures.getOrDefault("liquidationRisk", "UNKNOWN"));
         String macroRisk = String.valueOf(macroStatus.getOrDefault("macroRisk", "UNKNOWN"));
+        String externalRisk = String.valueOf(externalFeeds.getOrDefault("externalRisk", "UNKNOWN"));
+        int smartMoneyScore = (int) asDouble(externalFeeds.get("smartMoneyScore"));
         double baseAtr = switch (symbol) {
             case "BTCUSDT" -> 1850.0;
             case "ETHUSDT" -> 112.0;
@@ -421,7 +614,7 @@ public class CryptoTradingService {
                         - (Math.abs(fundingRate) > 0.0008 ? 8 : 0)
                         - ("HIGH".equals(liquidationRisk) ? 12 : 0))))
                 : 45;
-        String newsRisk = Math.abs(change1h) >= 3.5 || Math.abs(change24h) >= 9 || "HIGH".equals(liquidationRisk) || "HIGH".equals(macroRisk) ? "HIGH" : "NORMAL";
+        String newsRisk = Math.abs(change1h) >= 3.5 || Math.abs(change24h) >= 9 || "HIGH".equals(liquidationRisk) || "HIGH".equals(macroRisk) || "HIGH".equals(externalRisk) ? "HIGH" : "NORMAL";
         int volumeScore = liveCmc
                 ? (int) Math.round(Math.max(45, Math.min(92, 55 + Math.log10(Math.max(1, volume24h)) * 3.2)))
                 : 50;
@@ -435,7 +628,7 @@ public class CryptoTradingService {
         long alignedFrames = countMatchingSignals(timeframes, finalSignal);
         double confidence = averageVoteConfidence(aiVotes, finalSignal);
         Map<String, Object> aiDecision = buildAiDecision(symbol, marketPrice, futures, timeframes, technicalSignal,
-                technicalScore, futuresScore, volumeScore, newsRisk, liquidationRisk, macroStatus);
+                technicalScore, futuresScore, volumeScore, newsRisk, liquidationRisk, macroStatus, externalFeeds);
         finalSignal = String.valueOf(aiDecision.get("signal"));
         confidence = asDouble(aiDecision.get("confidence"));
         aiVotes = aiVotesFromDecision(aiDecision);
@@ -451,7 +644,7 @@ public class CryptoTradingService {
         double takeProfit = "LONG".equals(finalSignal) ? entry + takeDistance : entry - takeDistance;
         double trailingStop = "LONG".equals(finalSignal) ? entry + atr * 0.55 : entry - atr * 0.55;
         double macroScore = "HIGH".equals(macroRisk) ? 25 : "MEDIUM".equals(macroRisk) ? 58 : "NORMAL".equals(macroRisk) ? 85 : 65;
-        double finalScore = Math.round(confidence * 0.30 + technicalScore * 0.23 + volumeScore * 0.15 + futuresScore * 0.15 + ("HIGH".equals(newsRisk) ? 35 : 85) * 0.09 + macroScore * 0.08);
+        double finalScore = Math.round(confidence * 0.28 + technicalScore * 0.22 + volumeScore * 0.13 + futuresScore * 0.13 + ("HIGH".equals(newsRisk) ? 35 : 85) * 0.08 + macroScore * 0.07 + smartMoneyScore * 0.09);
         boolean allowed = liveCmc
                 && liveFutures
                 && finalScore >= 75
@@ -481,6 +674,7 @@ public class CryptoTradingService {
         signal.put("volume24h", volume24h);
         signal.put("futuresIntelligence", futures);
         signal.put("macroStatus", macroStatus);
+        signal.put("externalFeeds", externalFeeds);
         signal.put("technicalIndicators", indicators);
         signal.put("stopLoss", stopLoss);
         signal.put("takeProfit", takeProfit);
@@ -495,7 +689,7 @@ public class CryptoTradingService {
                 : "LONG=0% SHORT=0% NO_TRADE=100%");
         signal.put("bestAi", aiVotes.get(seed % aiVotes.size()).get("ai"));
         signal.put("indicatorSummary", Map.of("total", INDICATOR_COUNT, "bullish", indicatorBullish, "bearish", INDICATOR_COUNT - indicatorBullish));
-        signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | futuresScore=" + futuresScore + " | macroRisk=" + macroRisk + " | whaleProxy=" + futures.get("whaleProxy") + " | RR=" + riskReward);
+        signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | futuresScore=" + futuresScore + " | macroRisk=" + macroRisk + " | smartMoney=" + smartMoneyScore + " | whaleProxy=" + futures.get("whaleProxy") + " | RR=" + riskReward);
         signal.put("newsRisk", newsRisk);
         signal.put("blockReason", allowed ? "" : blockReason(liveCmc, confidence, alignedFrames, newsRisk, finalScore, finalSignal));
         return signal;
@@ -696,6 +890,44 @@ public class CryptoTradingService {
             return quote.get(key);
         }
         return null;
+    }
+
+    private Object nestedValue(Map<String, Object> source, String first, String second) {
+        Object firstValue = source.get(first);
+        if (firstValue instanceof Map<?, ?> nested) {
+            return nested.get(second);
+        }
+        return "";
+    }
+
+    private String classifyNewsTitle(String title) {
+        String lower = title == null ? "" : title.toLowerCase(Locale.ROOT);
+        if (lower.contains("hack")
+                || lower.contains("exploit")
+                || lower.contains("lawsuit")
+                || lower.contains("sec")
+                || lower.contains("ban")
+                || lower.contains("war")
+                || lower.contains("iran")
+                || lower.contains("crash")
+                || lower.contains("liquidation")
+                || lower.contains("outflow")
+                || lower.contains("sell-off")
+                || lower.contains("regulation")) {
+            return "RISK_OFF";
+        }
+        if (lower.contains("inflow")
+                || lower.contains("etf")
+                || lower.contains("accumulation"
+                )
+                || lower.contains("buy")
+                || lower.contains("fed")
+                || lower.contains("liquidity")
+                || lower.contains("reserve")
+                || lower.contains("approval")) {
+            return "RISK_ON";
+        }
+        return "NEUTRAL";
     }
 
     private double parsePercent(Object value) {
@@ -923,12 +1155,14 @@ public class CryptoTradingService {
                                                 int volumeScore,
                                                 String newsRisk,
                                                 String liquidationRisk,
-                                                Map<String, Object> macroStatus) {
+                                                Map<String, Object> macroStatus,
+                                                Map<String, Object> externalFeeds) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("symbol", symbol);
         payload.put("market", marketPrice);
         payload.put("futures", futures);
         payload.put("macro", macroStatus);
+        payload.put("externalFeeds", externalFeeds);
         payload.put("timeframes", timeframes);
         payload.put("technicalSignal", technicalSignal);
         payload.put("technicalScore", technicalScore);
@@ -940,6 +1174,7 @@ public class CryptoTradingService {
                 "Return only LONG, SHORT, or NO_TRADE.",
                 "Prefer NO_TRADE when futures/whale/news risk conflicts with indicators.",
                 "For LONG, S&P500/SPY must not be risk-off and dollar/DXY proxy must not be strongly up.",
+                "Use verified news, ETF proxy and whale/exchange-flow context before giving trade probability.",
                 "Do not trade during high liquidation/news risk.",
                 "Give probabilities that add to 100."
         ));
@@ -1008,6 +1243,7 @@ public class CryptoTradingService {
         Map<?, ?> market = payload.get("market") instanceof Map<?, ?> m ? m : Map.of();
         Map<?, ?> futures = payload.get("futures") instanceof Map<?, ?> f ? f : Map.of();
         Map<?, ?> macro = payload.get("macro") instanceof Map<?, ?> x ? x : Map.of();
+        Map<?, ?> external = payload.get("externalFeeds") instanceof Map<?, ?> e ? e : Map.of();
 
         double change1h = asDouble(market.get("percentChange1h"));
         double change24h = asDouble(market.get("percentChange24h"));
@@ -1018,17 +1254,22 @@ public class CryptoTradingService {
         String macroRisk = String.valueOf(macro.containsKey("macroRisk") ? macro.get("macroRisk") : "UNKNOWN");
         double sp500Change = asDouble(macro.get("sp500ChangePercent"));
         double dxyChange = asDouble(macro.get("dxyChangePercent"));
+        String externalRisk = String.valueOf(external.containsKey("externalRisk") ? external.get("externalRisk") : "UNKNOWN");
+        double smartMoneyScore = asDouble(external.get("smartMoneyScore"));
 
         double longScore = 25 + Math.max(0, change1h * 7) + Math.max(0, change24h * 3) + Math.max(0, change7d)
                 + (technicalScore - 50) * 0.45 + (futuresScore - 50) * 0.35 + (volumeScore - 50) * 0.2
                 + (longShortRatio > 1.03 ? 5 : 0) + (volumeSpike > 1.5 ? 4 : 0)
-                + (sp500Change > 0.35 ? 5 : 0) - (dxyChange > 0.35 ? 6 : 0);
+                + (sp500Change > 0.35 ? 5 : 0) - (dxyChange > 0.35 ? 6 : 0)
+                + Math.max(0, smartMoneyScore - 60) * 0.25;
         double shortScore = 25 + Math.max(0, -change1h * 7) + Math.max(0, -change24h * 3) + Math.max(0, -change7d)
                 + ("SHORT".equals(technicalSignal) ? 12 : 0)
                 + (longShortRatio < 0.97 ? 5 : 0) + (fundingRate > 0.0006 ? 4 : 0) + (volumeSpike > 1.8 ? 3 : 0)
                 + (sp500Change < -0.35 ? 5 : 0) + (dxyChange > 0.35 ? 4 : 0);
         double noTradeScore = 30 + ("HIGH".equals(newsRisk) ? 45 : 0) + ("HIGH".equals(liquidationRisk) ? 40 : 0)
                 + ("HIGH".equals(macroRisk) ? 32 : "MEDIUM".equals(macroRisk) ? 12 : 0)
+                + ("HIGH".equals(externalRisk) ? 35 : "MEDIUM".equals(externalRisk) ? 12 : 0)
+                + (smartMoneyScore < 45 ? 14 : 0)
                 + (Math.abs(change24h) < 0.25 ? 14 : 0)
                 + (!"LONG".equals(technicalSignal) && !"SHORT".equals(technicalSignal) ? 18 : 0);
 
@@ -1045,7 +1286,7 @@ public class CryptoTradingService {
         decision.put("shortChance", shortChance);
         decision.put("noTradeChance", noTradeChance);
         decision.put("confidence", confidence);
-        decision.put("reason", "Local AI scorer: indicators + CMC momentum + Binance futures + whale/news/macro risk.");
+        decision.put("reason", "Local AI scorer: indicators + CMC momentum + Binance futures + verified news + ETF/macro + whale-flow risk.");
         return normalizeAiDecision(decision, "LOCAL_AI");
     }
 

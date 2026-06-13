@@ -181,6 +181,20 @@ function CryptoTrading() {
         </div>
       </section>
 
+      <section style={smartMoneyPanel}>
+        <div style={panelHeader}>
+          <h2 style={panelTitle}>Smart Money Command Feed</h2>
+          <span style={dashboard.intelligence?.externalRisk === "HIGH" ? dangerPill : safePill}>
+            Score {dashboard.intelligence?.smartMoneyScore ?? 0}% | {dashboard.intelligence?.externalRisk || "WAITING"}
+          </span>
+        </div>
+        <div style={feedGrid}>
+          <FeedList title="Whale / Exchange Flow" status={dashboard.intelligence?.whaleFeed} items={dashboard.intelligence?.topWhales} />
+          <FeedList title="Verified News" status={dashboard.intelligence?.newsFeed} items={dashboard.intelligence?.verifiedNews} />
+          <FeedList title="ETF Rotation Proxy" status={dashboard.intelligence?.etfFeed} items={dashboard.intelligence?.etfFlows} />
+        </div>
+      </section>
+
       <div style={coinGrid}>
         {Object.values(dashboard.plans).map((plan) => (
           <button
@@ -405,6 +419,28 @@ function Info({ label, value, good, danger, strong }) {
   );
 }
 
+function FeedList({ title, status, items }) {
+  const rows = Array.isArray(items) ? items.slice(0, 5) : [];
+  return (
+    <div style={feedCard}>
+      <div style={feedHeader}>
+        <strong>{title}</strong>
+        <span style={feedStatus}>{status || "WAITING"}</span>
+      </div>
+      <div style={feedRows}>
+        {rows.map((item, index) => (
+          <div key={`${title}-${index}`} style={feedRow}>
+            <span style={feedAsset}>{item.asset || item.source || item.status || "Feed"}</span>
+            <strong style={feedSignal(item.sentiment || item.signal || item.severity)}>{item.sentiment || item.signal || item.severity || item.direction || "INFO"}</strong>
+            <small>{item.title || item.flow || item.message || item.rule || "-"}</small>
+          </div>
+        ))}
+        {rows.length === 0 && <div style={feedEmpty}>API data ka wait hai.</div>}
+      </div>
+    </div>
+  );
+}
+
 function buildDashboard(settings) {
   const plans = Object.fromEntries(
     Object.keys(MARKETS).map((symbol) => [symbol, buildPlan(symbol, settings)])
@@ -424,7 +460,15 @@ function buildDashboard(settings) {
       whaleTracker: "Waiting for backend",
       newsRisk: "Waiting",
       fakeNewsFilter: "Backend/CoinMarketCap data ka wait",
-      rule: "No fake local trade"
+      rule: "No fake local trade",
+      smartMoneyScore: 0,
+      externalRisk: "WAITING",
+      whaleFeed: "WAITING",
+      newsFeed: "WAITING",
+      etfFeed: "WAITING",
+      topWhales: [],
+      verifiedNews: [],
+      etfFlows: []
     },
     portfolio: {
       best,
@@ -659,6 +703,14 @@ function signalTextStyle(signal) {
   return noTradeSignalText;
 }
 
+function feedSignal(value) {
+  const text = String(value || "").toUpperCase();
+  const color = text.includes("HIGH") || text.includes("RISK_OFF") || text.includes("OUTFLOW") ? "#b91c1c"
+    : text.includes("INFLOW") || text.includes("RISK_ON") || text.includes("NORMAL") ? "#166534"
+      : "#92400e";
+  return { color };
+}
+
 const pageStyle = { padding: "28px", background: "#eef2f6", minHeight: "100vh", color: "#0f172a" };
 const heroStyle = { background: "linear-gradient(135deg, #071635 0%, #0f2963 52%, #0b3b36 100%)", color: "#ffffff", borderRadius: "8px", padding: "24px", display: "flex", justifyContent: "space-between", gap: "18px", alignItems: "center", marginBottom: "18px", boxShadow: "0 14px 34px rgba(15, 41, 99, 0.22)" };
 const eyebrowStyle = { color: "#f9d989", fontSize: "12px", fontWeight: "900", textTransform: "uppercase" };
@@ -708,6 +760,16 @@ const panelTitle = { margin: 0, fontSize: "17px", color: "#0f2963" };
 const pillStyle = { background: "#eef2ff", color: "#0f2963", borderRadius: "999px", padding: "6px 10px", fontSize: "12px", fontWeight: "900" };
 const safePill = { ...pillStyle, background: "#dcfce7", color: "#166534" };
 const warnPill = { ...pillStyle, background: "#fef3c7", color: "#92400e" };
+const dangerPill = { ...pillStyle, background: "#fee2e2", color: "#991b1b" };
+const smartMoneyPanel = { background: "#ffffff", borderRadius: "8px", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", overflow: "hidden", border: "1px solid #e2e8f0", marginBottom: "18px" };
+const feedGrid = { padding: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "14px" };
+const feedCard = { border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc", overflow: "hidden" };
+const feedHeader = { display: "flex", justifyContent: "space-between", gap: "10px", padding: "12px", borderBottom: "1px solid #e2e8f0", color: "#0f2963", alignItems: "center" };
+const feedStatus = { fontSize: "11px", fontWeight: "900", color: "#64748b", textAlign: "right" };
+const feedRows = { display: "grid" };
+const feedRow = { display: "grid", gap: "5px", padding: "11px 12px", borderBottom: "1px solid #e2e8f0", color: "#334155" };
+const feedAsset = { fontSize: "12px", color: "#64748b", fontWeight: "900", textTransform: "uppercase" };
+const feedEmpty = { padding: "14px", color: "#94a3b8", fontWeight: "800", textAlign: "center" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
 const tableWrap = { width: "100%", overflowX: "auto" };
 const thStyle = { textAlign: "left", padding: "11px 14px", background: "#f8fafc", color: "#475569", fontSize: "12px", textTransform: "uppercase", borderBottom: "1px solid #e2e8f0" };
