@@ -3,6 +3,8 @@ package com.vaishnav.Inventory.Controller;
 import com.vaishnav.Inventory.entity.product;
 import com.vaishnav.Inventory.service.ProductService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -50,5 +52,10 @@ public class ProductController {
     @GetMapping("/low-stock")
     public List<product> getLowStockProducts() {
         return productService.getLowStockProducts();
+    }
+
+    @ExceptionHandler({IllegalArgumentException.class, RuntimeException.class})
+    public ResponseEntity<String> handleProductError(RuntimeException error) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error.getMessage());
     }
 }

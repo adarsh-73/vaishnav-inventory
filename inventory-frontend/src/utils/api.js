@@ -1,5 +1,8 @@
 function resolveApiBase() {
   if (process.env.REACT_APP_API_BASE) return process.env.REACT_APP_API_BASE;
+  if (typeof window !== "undefined" && window.location.hostname.includes("onrender.com")) {
+    return "https://vaishnav-inventory.onrender.com";
+  }
   return "";
 }
 

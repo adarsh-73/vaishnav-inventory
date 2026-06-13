@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { todayDate } from '../utils/storage';
 import { API_BASE, getInvoiceBusinessCategory, getInvoiceCategoryTotals, inferInvoiceItemCategory, isServiceText } from '../utils/api';
 
 export default function VaishnavFinalInvoice() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [customerName, setCustomerName] = useState("");
   const [mobileNo, setMobileNo] = useState("");
@@ -324,14 +325,22 @@ export default function VaishnavFinalInvoice() {
   };
 
   const startNewBill = () => {
+    navigate("/billing", { replace: true });
     setBillNo(`V-${Date.now().toString().slice(-5)}`);
     setBillDate(todayDate());
     setCustomerName("");
     setMobileNo("");
     setVehicleNo("");
+    setBusinessCategory("accessories");
     setItems([]);
     setEditingItemId(null);
     setEditingInvoiceId(null);
+    setSelectedProductId("");
+    setProductSearch("");
+    setNewDesc("");
+    setNewQty("");
+    setNewRate("");
+    setNewItemMode("manual_accessory");
     setPaidAmount("");
   };
 

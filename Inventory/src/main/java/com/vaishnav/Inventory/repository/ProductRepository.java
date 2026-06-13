@@ -13,6 +13,8 @@ public interface ProductRepository extends JpaRepository<product, Long> {
     // ✅ 1. Duplicate check (fast and efficient)
     boolean existsByBarcode(String barcode);
 
+    boolean existsByBarcodeAndIdNot(String barcode, Long id);
+
     // ✅ 2. Find by barcode (used in validation / sell flow)
     Optional<product> findByBarcode(String barcode);
 

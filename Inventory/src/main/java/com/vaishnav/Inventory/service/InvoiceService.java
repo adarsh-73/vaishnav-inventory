@@ -202,6 +202,7 @@ public class InvoiceService {
 
     private Invoice saveInvoice(Invoice invoice, Long updatingId) {
 
+        normalizeInvoice(invoice);
         double totalAmount = invoice.getTotalAmount() != null ? invoice.getTotalAmount() : 0;
 
         invoice.setCustomer(resolveCustomer(invoice.getCustomer()));
@@ -219,7 +220,7 @@ public class InvoiceService {
                 int soldQuantity = item.getQuantity() == null ? 0 : item.getQuantity();
 
                 if (availableQuantity < soldQuantity) {
-                    throw new RuntimeException("Insufficient stock for " + productobj.getProductName());
+                    throw new IllegalArgumentException("Stock kam hai: " + productobj.getProductName() + " | Available " + availableQuantity + ", bill qty " + soldQuantity);
                 }
 
                 productobj.setQuantity(availableQuantity - soldQuantity);
@@ -258,9 +259,9 @@ public class InvoiceService {
 
         Invoice savedInvoice = invoiceRepository.save(invoice);
 
-        DailyBookEntry entry = dailyBookEntryRepository
-                .findFirstByNoteContainingIgnoreCase(invoice.getInvoiceNumber())
-                .orElse(new DailyBookEntry());
+        DailyBookEntry entry = invoice.getInvoiceNumber() != null && !invoice.getInvoiceNumber().isBlank()
+                ? dailyBookEntryRepository.findFirstByNoteContainingIgnoreCase(invoice.getInvoiceNumber()).orElse(new DailyBookEntry())
+                : new DailyBookEntry();
         entry.setEntryType("income");
         entry.setIncomeCategory(normalizeIncomeCategory(invoice.getBusinessCategory(), invoice.getInvoiceItems()));
         entry.setPartyName(invoice.getCustomer() != null ? invoice.getCustomer().getCustomerName() : "Walk-in Customer");
@@ -284,6 +285,29 @@ public class InvoiceService {
     private Customer resolveCustomer(Customer incomingCustomer) {
         if (incomingCustomer == null) return null;
 
+        incomingCustomer.setCustomerName(clean(incomingCustomer.getCustomerName()));
+        incomingCustomer.setMobileNumber(clean(incomingCustomer.getMobileNumber()));
+        incomingCustomer.setEmail(clean(incomingCustomer.getEmail()));
+        incomingCustomer.setAddress(clean(incomingCustomer.getAddress()));
+
+        if (incomingCustomer.getId() != null) {
+            return customerRepository.findById(incomingCustomer.getId())
+                    .map(savedCustomer -> {
+                        if (incomingCustomer.getCustomerName() != null) savedCustomer.setCustomerName(incomingCustomer.getCustomerName());
+                        if (incomingCustomer.getMobileNumber() != null) savedCustomer.setMobileNumber(incomingCustomer.getMobileNumber());
+                        if (incomingCustomer.getEmail() != null) savedCustomer.setEmail(incomingCustomer.getEmail());
+                        if (incomingCustomer.getAddress() != null) savedCustomer.setAddress(incomingCustomer.getAddress());
+                        return customerRepository.save(savedCustomer);
+                    })
+                    .orElse(null);
+        }
+
+        if (incomingCustomer.getMobileNumber() == null
+                && (incomingCustomer.getCustomerName() == null
+                || "walk-in customer".equalsIgnoreCase(incomingCustomer.getCustomerName()))) {
+            return null;
+        }
+
         Customer savedCustomer = null;
         if (incomingCustomer.getMobileNumber() != null && !incomingCustomer.getMobileNumber().isBlank()) {
             savedCustomer = customerRepository.findByMobileNumber(incomingCustomer.getMobileNumber());
@@ -298,6 +322,34 @@ public class InvoiceService {
         }
 
         return customerRepository.save(savedCustomer);
+    }
+
+    private void normalizeInvoice(Invoice invoice) {
+        if (invoice.getInvoiceNumber() == null || invoice.getInvoiceNumber().isBlank()) {
+            invoice.setInvoiceNumber("V-" + System.currentTimeMillis());
+        } else {
+            invoice.setInvoiceNumber(invoice.getInvoiceNumber().trim());
+        }
+
+        invoice.setPaymentMethod(clean(invoice.getPaymentMethod()));
+        invoice.setBusinessCategory(clean(invoice.getBusinessCategory()));
+        if (invoice.getPaidAmount() == null) invoice.setPaidAmount(0.0);
+        if (invoice.getRemainingAmount() == null) invoice.setRemainingAmount(0.0);
+
+        if (invoice.getInvoiceItems() != null) {
+            for (InvoiceItem item : invoice.getInvoiceItems()) {
+                item.setDescription(clean(item.getDescription()));
+                item.setItemCategory(clean(item.getItemCategory()));
+                if (item.getQuantity() == null || item.getQuantity() < 0) item.setQuantity(0);
+                if (item.getSellPrice() == null || item.getSellPrice() < 0) item.setSellPrice(0.0);
+            }
+        }
+    }
+
+    private String clean(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isBlank() ? null : trimmed;
     }
 
     private void restoreStock(Invoice invoice, String note) {

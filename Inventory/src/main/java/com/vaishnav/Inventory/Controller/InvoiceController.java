@@ -4,6 +4,9 @@ import com.vaishnav.Inventory.entity.Invoice;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
 import com.vaishnav.Inventory.service.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -53,5 +56,15 @@ public class InvoiceController {
     @DeleteMapping("/{id}")
     public void deleteInvoice(@PathVariable Long id) {
         invoiceService.deleteInvoice(id);
+    }
+
+    @ExceptionHandler({IllegalArgumentException.class, RuntimeException.class})
+    public ResponseEntity<String> handleInvoiceError(RuntimeException error) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error.getMessage());
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<String> handleInvoiceDataError(DataIntegrityViolationException error) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Bill save nahi hua. Customer mobile ya bill data duplicate/invalid hai.");
     }
 }

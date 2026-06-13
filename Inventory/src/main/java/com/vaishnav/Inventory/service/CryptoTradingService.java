@@ -3,6 +3,7 @@ package com.vaishnav.Inventory.service;
 import com.vaishnav.Inventory.entity.CryptoPaperTrade;
 import com.vaishnav.Inventory.repository.CryptoPaperTradeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -20,6 +22,10 @@ public class CryptoTradingService {
     private static final List<String> AI_ENGINES = List.of("ChatGPT", "Gemini", "DeepSeek", "Claude", "Risk AI");
     private static final int INDICATOR_COUNT = 100;
     private static final int MAX_DAILY_PAPER_TRADES = 5;
+    private static final long CMC_CACHE_SECONDS = 60;
+
+    private volatile Map<String, Map<String, Object>> cachedMarketPrices;
+    private volatile Instant cachedMarketPricesAt;
 
     @Autowired
     private CryptoPaperTradeRepository paperTradeRepository;
@@ -27,10 +33,20 @@ public class CryptoTradingService {
     @Autowired
     private CryptoExchangeService cryptoExchangeService;
 
+    @Scheduled(fixedDelay = 15 * 60 * 1000, initialDelay = 60 * 1000)
+    public void scheduledPaperMonitor() {
+        try {
+            runPaperScan();
+        } catch (Exception ignored) {
+            // Paper monitor must never break the main billing/inventory app.
+        }
+    }
+
     public Map<String, Object> getDashboard() {
         Map<String, Object> response = new LinkedHashMap<>();
         Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
         List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices)).toList();
+        evaluateRunningTrades(marketPrices, signals);
         List<CryptoPaperTrade> trades = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(40));
         Map<String, Object> report = buildReport(trades);
 
@@ -51,18 +67,21 @@ public class CryptoTradingService {
 
     public List<CryptoPaperTrade> runPaperScan() {
         List<CryptoPaperTrade> created = new ArrayList<>();
+        Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
+        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices)).toList();
+        evaluateRunningTrades(marketPrices, signals);
+
         long runningCount = paperTradeRepository.findByStatus("RUNNING").size();
         if (runningCount >= 1) return created;
         long todayTrades = paperTradeRepository.findByCreatedAtAfter(java.time.LocalDate.now().atStartOfDay()).size();
         if (todayTrades >= MAX_DAILY_PAPER_TRADES) return created;
 
-        for (String symbol : SYMBOLS) {
-            Map<String, Object> signal = buildSignal(symbol, fetchCoinMarketCapPrices());
+        for (Map<String, Object> signal : signals) {
             boolean allowed = Boolean.TRUE.equals(signal.get("allowed"));
             if (!allowed) continue;
 
             CryptoPaperTrade trade = new CryptoPaperTrade();
-            trade.setSymbol(symbol);
+            trade.setSymbol(String.valueOf(signal.get("symbol")));
             trade.setSide(String.valueOf(signal.get("finalSignal")));
             trade.setStatus("RUNNING");
             trade.setTimeframe("15m/1h/4h");
@@ -83,6 +102,48 @@ public class CryptoTradingService {
             break;
         }
         return created;
+    }
+
+    private void evaluateRunningTrades(Map<String, Map<String, Object>> marketPrices, List<Map<String, Object>> signals) {
+        Map<String, Map<String, Object>> signalBySymbol = new HashMap<>();
+        for (Map<String, Object> signal : signals) {
+            signalBySymbol.put(String.valueOf(signal.get("symbol")), signal);
+        }
+
+        for (CryptoPaperTrade trade : paperTradeRepository.findByStatus("RUNNING")) {
+            Map<String, Object> market = marketPrices.get(trade.getSymbol());
+            if (market == null || !"COINMARKETCAP".equals(market.get("source"))) continue;
+
+            double currentPrice = asDouble(market.get("price"));
+            double entry = trade.getEntryPrice() == null ? currentPrice : trade.getEntryPrice();
+            double quantity = trade.getQuantity() == null ? 0 : trade.getQuantity();
+            double direction = "SHORT".equals(trade.getSide()) ? -1 : 1;
+            boolean hitTakeProfit = "SHORT".equals(trade.getSide())
+                    ? currentPrice <= asDouble(trade.getTakeProfit())
+                    : currentPrice >= asDouble(trade.getTakeProfit());
+            boolean hitStopLoss = "SHORT".equals(trade.getSide())
+                    ? currentPrice >= asDouble(trade.getStopLoss())
+                    : currentPrice <= asDouble(trade.getStopLoss());
+
+            Map<String, Object> signal = signalBySymbol.get(trade.getSymbol());
+            String finalSignal = signal == null ? "" : String.valueOf(signal.get("finalSignal"));
+            boolean oppositeSignal = ("LONG".equals(trade.getSide()) && "SHORT".equals(finalSignal))
+                    || ("SHORT".equals(trade.getSide()) && "LONG".equals(finalSignal));
+
+            if (!hitTakeProfit && !hitStopLoss && !oppositeSignal) {
+                continue;
+            }
+
+            double pnl = (currentPrice - entry) * quantity * direction;
+            trade.setExitPrice(currentPrice);
+            trade.setPnl(pnl);
+            trade.setStatus(pnl >= 0 ? "PROFIT" : "LOSS");
+            trade.setCloseReason(hitTakeProfit ? "Take profit booked by AI"
+                    : hitStopLoss ? "Stop loss hit by risk engine"
+                    : "AI opposite signal close");
+            trade.setClosedAt(LocalDateTime.now());
+            paperTradeRepository.save(trade);
+        }
     }
 
     public List<CryptoPaperTrade> closeRunningTrades() {
@@ -201,6 +262,13 @@ public class CryptoTradingService {
     }
 
     private Map<String, Map<String, Object>> fetchCoinMarketCapPrices() {
+        Map<String, Map<String, Object>> cached = cachedMarketPrices;
+        if (cached != null
+                && cachedMarketPricesAt != null
+                && Instant.now().minusSeconds(CMC_CACHE_SECONDS).isBefore(cachedMarketPricesAt)) {
+            return cached;
+        }
+
         Map<String, Map<String, Object>> prices = new LinkedHashMap<>();
         SYMBOLS.forEach(symbol -> prices.put(symbol, fallbackPrice(symbol)));
 
@@ -243,6 +311,8 @@ public class CryptoTradingService {
                     prices.put(coin + "USDT", value);
                 }
             }
+            cachedMarketPrices = prices;
+            cachedMarketPricesAt = Instant.now();
             return prices;
         } catch (Exception error) {
             prices.replaceAll((symbol, oldValue) -> {
@@ -251,6 +321,8 @@ public class CryptoTradingService {
                 value.put("warning", "CoinMarketCap fetch failed. Check COINMARKETCAP_API_KEY in Render and redeploy backend.");
                 return value;
             });
+            cachedMarketPrices = prices;
+            cachedMarketPricesAt = Instant.now();
             return prices;
         }
     }
