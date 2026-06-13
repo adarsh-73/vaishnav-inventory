@@ -86,6 +86,16 @@ function CryptoTrading() {
     }
   };
 
+  const cleanupBadDataTrades = async () => {
+    try {
+      const result = await apiRequest("/crypto/cleanup-bad-data", { method: "POST" });
+      await loadDashboard();
+      alert(`${result?.cancelled || 0} bad/fallback trades clean ho gaye.`);
+    } catch (error) {
+      alert(`Cleanup failed: ${error.message}`);
+    }
+  };
+
   const connectBinance = async () => {
     if (!apiKey.trim() || !apiSecret.trim()) return alert("API key aur API secret dono bharna hoga.");
     try {
@@ -139,6 +149,7 @@ function CryptoTrading() {
         <button type="button" onClick={loadDashboard} style={secondaryBtn}>{loading ? "Loading..." : "Refresh Signals"}</button>
         <button type="button" onClick={runPaperScan} style={primaryBtn}>Run Paper Scan</button>
         <button type="button" onClick={closeRunningTrades} style={dangerBtn}>Close Running Paper</button>
+        <button type="button" onClick={cleanupBadDataTrades} style={secondaryBtn}>Clean Bad Trades</button>
       </section>
 
       <section style={noticeStyle}>
@@ -148,6 +159,7 @@ function CryptoTrading() {
       <section style={intelligenceGrid}>
         <Info label="Whale Watch" value={dashboard.intelligence?.whaleTracker || "Waiting"} />
         <Info label="News Risk" value={dashboard.intelligence?.newsRisk || "Waiting"} />
+        <Info label="Macro Risk" value={dashboard.intelligence?.macro?.macroRisk || dashboard.intelligence?.macro?.sp500 || "Waiting"} />
         <Info label="Fake News Guard" value={dashboard.intelligence?.fakeNewsFilter || "Backend data ka wait"} />
         <Info label="Trade Rule" value={dashboard.intelligence?.rule || "No real-money auto trade until all filters pass"} />
       </section>
@@ -185,6 +197,7 @@ function CryptoTrading() {
         <Metric label="Paper Equity" value={formatUsd(portfolio.equity)} accent="#166534" />
         <Metric label="Max Drawdown" value={`${portfolio.maxDrawdown}%`} accent="#b91c1c" />
         <Metric label="DB Paper Trades" value={portfolio.trades} accent="#0f2963" />
+        <Metric label="Bad Data Cleaned" value={portfolio.cancelledBadDataTrades} accent="#92400e" />
         <Metric label="Today Trades" value={`${portfolio.todayTrades}/${portfolio.maxDailyTrades}`} accent="#0f2963" />
         <Metric label="Today Profit" value={formatUsd(portfolio.todayPnl)} accent={portfolio.todayPnl >= 0 ? "#15803d" : "#b91c1c"} />
         <Metric label="Week Profit" value={formatUsd(portfolio.weekPnl)} accent={portfolio.weekPnl >= 0 ? "#15803d" : "#b91c1c"} />
@@ -453,6 +466,7 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
       monthPnl: Number(report.monthPnl ?? report.virtualPnl ?? 0),
       trades: Number(report.totalTrades || 0),
       profitableTrades: Number(report.profitableTrades || 0),
+      cancelledBadDataTrades: Number(report.cancelledBadDataTrades || 0),
       lossTrades: Number(report.lossTrades || 0),
       runningTrades: Number(report.runningTrades || 0),
       todayTrades: Number(report.todayTrades || 0),

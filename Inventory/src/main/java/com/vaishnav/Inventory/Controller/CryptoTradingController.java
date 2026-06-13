@@ -35,6 +35,11 @@ public class CryptoTradingController {
         return cryptoTradingService.closeRunningTrades();
     }
 
+    @PostMapping("/cleanup-bad-data")
+    public Map<String, Object> cleanupBadData() {
+        return cryptoTradingService.cleanupBadFallbackTrades();
+    }
+
     @GetMapping("/binance/status")
     public Map<String, Object> binanceStatus() {
         return cryptoExchangeService.testnetClientStatus();

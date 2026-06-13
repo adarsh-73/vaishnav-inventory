@@ -52,7 +52,9 @@ public class CryptoTradingService {
         Map<String, Object> response = new LinkedHashMap<>();
         Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
         Map<String, Map<String, Object>> futuresIntel = fetchFuturesIntelligence();
-        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel)).toList();
+        Map<String, Object> macroStatus = fetchMacroStatus();
+        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel, macroStatus)).toList();
+        cleanupBadFallbackTrades(marketPrices);
         evaluateRunningTrades(marketPrices, signals);
         List<CryptoPaperTrade> trades = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(40));
         Map<String, Object> report = buildReport(trades);
@@ -64,7 +66,7 @@ public class CryptoTradingService {
         response.put("todayTradeSlotsLeft", Math.max(0, MAX_DAILY_PAPER_TRADES - ((Number) report.get("todayTrades")).intValue()));
         response.put("marketDataSource", marketPrices.values().stream().anyMatch(price -> "COINMARKETCAP".equals(price.get("source"))) ? "COINMARKETCAP" : "FALLBACK");
         response.put("symbols", signals);
-        response.put("intelligence", buildMarketIntelligence(marketPrices, futuresIntel, signals));
+        response.put("intelligence", buildMarketIntelligence(marketPrices, futuresIntel, signals, macroStatus));
         response.put("report", report);
         response.put("openTrades", paperTradeRepository.findByStatus("RUNNING"));
         response.put("recentTrades", trades.stream().sorted(Comparator.comparing(CryptoPaperTrade::getId).reversed()).limit(25).toList());
@@ -75,7 +77,8 @@ public class CryptoTradingService {
 
     private Map<String, Object> buildMarketIntelligence(Map<String, Map<String, Object>> marketPrices,
                                                         Map<String, Map<String, Object>> futuresIntel,
-                                                        List<Map<String, Object>> signals) {
+                                                        List<Map<String, Object>> signals,
+                                                        Map<String, Object> macroStatus) {
         double totalVolume = marketPrices.values().stream()
                 .mapToDouble(price -> asDouble(price.get("volume24h")))
                 .sum();
@@ -95,18 +98,46 @@ public class CryptoTradingService {
         intelligence.put("whaleFeed", hasEnv("WHALE_ALERT_API_KEY") || hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY")
                 ? "WHALE_API_READY"
                 : "Add WHALE_ALERT_API_KEY / GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY for real wallet and exchange-flow tracking.");
-        intelligence.put("macro", buildMacroStatus());
+        intelligence.put("macro", macroStatus);
         intelligence.put("topWhales", buildWhaleStatus());
         intelligence.put("symbols", futuresIntel);
         intelligence.put("rule", "Trade only when CMC + indicators + futures/whale proxy + news risk filters agree.");
         return intelligence;
     }
 
-    private Map<String, Object> buildMacroStatus() {
+    private Map<String, Object> fetchMacroStatus() {
         Map<String, Object> macro = new LinkedHashMap<>();
         macro.put("sp500", hasEnv("TWELVEDATA_API_KEY") || hasEnv("ALPHAVANTAGE_API_KEY") ? "API_READY" : "Add TWELVEDATA_API_KEY or ALPHAVANTAGE_API_KEY for S&P 500 confirmation.");
-        macro.put("dxy", hasEnv("TWELVEDATA_API_KEY") ? "API_READY" : "Add macro API for DXY risk filter.");
+        macro.put("dxy", hasEnv("TWELVEDATA_API_KEY") || hasEnv("ALPHAVANTAGE_API_KEY") ? "API_READY" : "Add macro API for DXY risk filter.");
+        macro.put("macroRisk", "UNKNOWN");
         macro.put("rule", "Crypto longs are filtered harder when S&P 500 risk-off or DXY strong.");
+        String alphaKey = System.getenv("ALPHAVANTAGE_API_KEY");
+        if (alphaKey == null || alphaKey.isBlank()) return macro;
+
+        try {
+            RestTemplate restTemplate = new RestTemplate();
+            Map<?, ?> spy = restTemplate.getForObject(
+                    "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=SPY&apikey=" + alphaKey,
+                    Map.class
+            );
+            Map<?, ?> uup = restTemplate.getForObject(
+                    "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=UUP&apikey=" + alphaKey,
+                    Map.class
+            );
+            double spyChange = parsePercent(globalQuoteValue(spy, "10. change percent"));
+            double uupChange = parsePercent(globalQuoteValue(uup, "10. change percent"));
+            macro.put("sp500", "CONNECTED");
+            macro.put("sp500Proxy", "SPY");
+            macro.put("sp500ChangePercent", round(spyChange));
+            macro.put("dxy", "CONNECTED");
+            macro.put("dxyProxy", "UUP");
+            macro.put("dxyChangePercent", round(uupChange));
+            macro.put("macroRisk", spyChange <= -1.0 || uupChange >= 0.8 ? "HIGH" : spyChange <= -0.35 || uupChange >= 0.35 ? "MEDIUM" : "NORMAL");
+            macro.put("rule", "SPY down or UUP/DXY proxy strong means crypto longs need stronger confirmation.");
+        } catch (Exception error) {
+            macro.put("macroRisk", "UNKNOWN");
+            macro.put("warning", "AlphaVantage macro fetch failed. Check ALPHAVANTAGE_API_KEY.");
+        }
         return macro;
     }
 
@@ -128,12 +159,16 @@ public class CryptoTradingService {
         List<CryptoPaperTrade> created = new ArrayList<>();
         Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
         Map<String, Map<String, Object>> futuresIntel = fetchFuturesIntelligence();
-        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel)).toList();
+        Map<String, Object> macroStatus = fetchMacroStatus();
+        List<Map<String, Object>> signals = SYMBOLS.stream().map(symbol -> buildSignal(symbol, marketPrices, futuresIntel, macroStatus)).toList();
+        cleanupBadFallbackTrades(marketPrices);
         evaluateRunningTrades(marketPrices, signals);
 
         long runningCount = paperTradeRepository.findByStatus("RUNNING").size();
         if (runningCount >= 1) return created;
-        long todayTrades = paperTradeRepository.findByCreatedAtAfter(java.time.LocalDate.now().atStartOfDay()).size();
+        long todayTrades = paperTradeRepository.findByCreatedAtAfter(java.time.LocalDate.now().atStartOfDay()).stream()
+                .filter(trade -> !"CANCELLED_BAD_DATA".equals(trade.getStatus()))
+                .count();
         if (todayTrades >= MAX_DAILY_PAPER_TRADES) return created;
 
         for (Map<String, Object> signal : signals) {
@@ -162,6 +197,40 @@ public class CryptoTradingService {
             break;
         }
         return created;
+    }
+
+    public Map<String, Object> cleanupBadFallbackTrades() {
+        Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
+        int cancelled = cleanupBadFallbackTrades(marketPrices);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("cancelled", cancelled);
+        response.put("status", "BAD_FALLBACK_TRADES_CLEANED");
+        return response;
+    }
+
+    private int cleanupBadFallbackTrades(Map<String, Map<String, Object>> marketPrices) {
+        int cancelled = 0;
+        List<CryptoPaperTrade> trades = paperTradeRepository.findAll();
+        for (CryptoPaperTrade trade : trades) {
+            if (!"RUNNING".equals(trade.getStatus()) && !"PROFIT".equals(trade.getStatus()) && !"LOSS".equals(trade.getStatus())) {
+                continue;
+            }
+            Map<String, Object> market = marketPrices.get(trade.getSymbol());
+            if (market == null || !"COINMARKETCAP".equals(market.get("source"))) continue;
+            double currentPrice = asDouble(market.get("price"));
+            double entry = trade.getEntryPrice() == null ? 0 : trade.getEntryPrice();
+            double mismatch = currentPrice > 0 ? Math.abs(entry - currentPrice) / currentPrice : 0;
+            if (mismatch <= 0.25) continue;
+
+            trade.setExitPrice(currentPrice);
+            trade.setPnl(0.0);
+            trade.setStatus("CANCELLED_BAD_DATA");
+            trade.setCloseReason("Cancelled stale fallback trade. Entry did not match live CoinMarketCap price.");
+            trade.setClosedAt(LocalDateTime.now());
+            paperTradeRepository.save(trade);
+            cancelled++;
+        }
+        return cancelled;
     }
 
     private void evaluateRunningTrades(Map<String, Map<String, Object>> marketPrices, List<Map<String, Object>> signals) {
@@ -219,16 +288,32 @@ public class CryptoTradingService {
     }
 
     public List<CryptoPaperTrade> closeRunningTrades() {
+        Map<String, Map<String, Object>> marketPrices = fetchCoinMarketCapPrices();
         List<CryptoPaperTrade> runningTrades = paperTradeRepository.findByStatus("RUNNING");
         for (CryptoPaperTrade trade : runningTrades) {
-            double move = ((trade.getId() == null ? 1 : trade.getId()) % 3 == 0) ? -0.006 : 0.011;
+            Map<String, Object> market = marketPrices.get(trade.getSymbol());
+            if (market == null || !"COINMARKETCAP".equals(market.get("source"))) {
+                continue;
+            }
+            double exitPrice = asDouble(market.get("price"));
+            double entry = trade.getEntryPrice() == null ? exitPrice : trade.getEntryPrice();
+            double mismatch = exitPrice > 0 ? Math.abs(entry - exitPrice) / exitPrice : 0;
+            if (mismatch > 0.25) {
+                trade.setExitPrice(exitPrice);
+                trade.setPnl(0.0);
+                trade.setStatus("CANCELLED_BAD_DATA");
+                trade.setCloseReason("Cancelled stale fallback entry during manual close.");
+                trade.setClosedAt(LocalDateTime.now());
+                paperTradeRepository.save(trade);
+                continue;
+            }
             double direction = "LONG".equals(trade.getSide()) ? 1 : -1;
-            double exitPrice = trade.getEntryPrice() * (1 + move * direction);
-            double pnl = (exitPrice - trade.getEntryPrice()) * trade.getQuantity() * direction;
+            double quantity = trade.getQuantity() == null ? 0 : trade.getQuantity();
+            double pnl = (exitPrice - entry) * quantity * direction;
             trade.setExitPrice(exitPrice);
             trade.setPnl(pnl);
             trade.setStatus(pnl >= 0 ? "PROFIT" : "LOSS");
-            trade.setCloseReason(pnl >= 0 ? "AI trailing profit booked" : "Risk engine stop-loss exit");
+            trade.setCloseReason(pnl >= 0 ? "Manual close at live CoinMarketCap price" : "Manual risk close at live CoinMarketCap price");
             trade.setClosedAt(LocalDateTime.now());
             paperTradeRepository.save(trade);
         }
@@ -237,7 +322,8 @@ public class CryptoTradingService {
 
     private Map<String, Object> buildSignal(String symbol,
                                             Map<String, Map<String, Object>> marketPrices,
-                                            Map<String, Map<String, Object>> futuresIntel) {
+                                            Map<String, Map<String, Object>> futuresIntel,
+                                            Map<String, Object> macroStatus) {
         int seed = Math.abs(symbol.hashCode());
         Map<String, Object> marketPrice = marketPrices.getOrDefault(symbol, fallbackPrice(symbol));
         Map<String, Object> futures = futuresIntel.getOrDefault(symbol, fallbackFuturesIntel(symbol));
@@ -255,6 +341,7 @@ public class CryptoTradingService {
                 ? new LinkedHashMap<>((Map<String, Object>) indicatorMap)
                 : fallbackIndicators();
         String liquidationRisk = String.valueOf(futures.getOrDefault("liquidationRisk", "UNKNOWN"));
+        String macroRisk = String.valueOf(macroStatus.getOrDefault("macroRisk", "UNKNOWN"));
         double baseAtr = switch (symbol) {
             case "BTCUSDT" -> 1850.0;
             case "ETHUSDT" -> 112.0;
@@ -286,7 +373,7 @@ public class CryptoTradingService {
                         - (Math.abs(fundingRate) > 0.0008 ? 8 : 0)
                         - ("HIGH".equals(liquidationRisk) ? 12 : 0))))
                 : 45;
-        String newsRisk = Math.abs(change1h) >= 3.5 || Math.abs(change24h) >= 9 || "HIGH".equals(liquidationRisk) ? "HIGH" : "NORMAL";
+        String newsRisk = Math.abs(change1h) >= 3.5 || Math.abs(change24h) >= 9 || "HIGH".equals(liquidationRisk) || "HIGH".equals(macroRisk) ? "HIGH" : "NORMAL";
         int volumeScore = liveCmc
                 ? (int) Math.round(Math.max(45, Math.min(92, 55 + Math.log10(Math.max(1, volume24h)) * 3.2)))
                 : 50;
@@ -300,7 +387,7 @@ public class CryptoTradingService {
         long alignedFrames = countMatchingSignals(timeframes, finalSignal);
         double confidence = averageVoteConfidence(aiVotes, finalSignal);
         Map<String, Object> aiDecision = buildAiDecision(symbol, marketPrice, futures, timeframes, technicalSignal,
-                technicalScore, futuresScore, volumeScore, newsRisk, liquidationRisk);
+                technicalScore, futuresScore, volumeScore, newsRisk, liquidationRisk, macroStatus);
         finalSignal = String.valueOf(aiDecision.get("signal"));
         confidence = asDouble(aiDecision.get("confidence"));
         aiVotes = aiVotesFromDecision(aiDecision);
@@ -315,7 +402,8 @@ public class CryptoTradingService {
         double stopLoss = "LONG".equals(finalSignal) ? entry - stopDistance : entry + stopDistance;
         double takeProfit = "LONG".equals(finalSignal) ? entry + takeDistance : entry - takeDistance;
         double trailingStop = "LONG".equals(finalSignal) ? entry + atr * 0.55 : entry - atr * 0.55;
-        double finalScore = Math.round(confidence * 0.32 + technicalScore * 0.24 + volumeScore * 0.16 + futuresScore * 0.16 + ("HIGH".equals(newsRisk) ? 35 : 85) * 0.12);
+        double macroScore = "HIGH".equals(macroRisk) ? 25 : "MEDIUM".equals(macroRisk) ? 58 : "NORMAL".equals(macroRisk) ? 85 : 65;
+        double finalScore = Math.round(confidence * 0.30 + technicalScore * 0.23 + volumeScore * 0.15 + futuresScore * 0.15 + ("HIGH".equals(newsRisk) ? 35 : 85) * 0.09 + macroScore * 0.08);
         boolean allowed = liveCmc
                 && liveFutures
                 && finalScore >= 75
@@ -344,6 +432,7 @@ public class CryptoTradingService {
         signal.put("percentChange7d", change7d);
         signal.put("volume24h", volume24h);
         signal.put("futuresIntelligence", futures);
+        signal.put("macroStatus", macroStatus);
         signal.put("technicalIndicators", indicators);
         signal.put("stopLoss", stopLoss);
         signal.put("takeProfit", takeProfit);
@@ -358,7 +447,7 @@ public class CryptoTradingService {
                 : "LONG=0% SHORT=0% NO_TRADE=100%");
         signal.put("bestAi", aiVotes.get(seed % aiVotes.size()).get("ai"));
         signal.put("indicatorSummary", Map.of("total", INDICATOR_COUNT, "bullish", indicatorBullish, "bearish", INDICATOR_COUNT - indicatorBullish));
-        signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | futuresScore=" + futuresScore + " | whaleProxy=" + futures.get("whaleProxy") + " | RR=" + riskReward);
+        signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | futuresScore=" + futuresScore + " | macroRisk=" + macroRisk + " | whaleProxy=" + futures.get("whaleProxy") + " | RR=" + riskReward);
         signal.put("newsRisk", newsRisk);
         signal.put("blockReason", allowed ? "" : blockReason(liveCmc, confidence, alignedFrames, newsRisk, finalScore, finalSignal));
         return signal;
@@ -550,6 +639,21 @@ public class CryptoTradingService {
             return map.get(key);
         }
         return null;
+    }
+
+    private Object globalQuoteValue(Map<?, ?> source, String key) {
+        if (source == null) return null;
+        Object quoteObj = source.get("Global Quote");
+        if (quoteObj instanceof Map<?, ?> quote) {
+            return quote.get(key);
+        }
+        return null;
+    }
+
+    private double parsePercent(Object value) {
+        if (value == null) return 0;
+        String text = String.valueOf(value).replace("%", "").trim();
+        return parseDouble(text);
     }
 
     private double calculateVolumeSpike(Object klinesObj) {
@@ -770,11 +874,13 @@ public class CryptoTradingService {
                                                 int futuresScore,
                                                 int volumeScore,
                                                 String newsRisk,
-                                                String liquidationRisk) {
+                                                String liquidationRisk,
+                                                Map<String, Object> macroStatus) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("symbol", symbol);
         payload.put("market", marketPrice);
         payload.put("futures", futures);
+        payload.put("macro", macroStatus);
         payload.put("timeframes", timeframes);
         payload.put("technicalSignal", technicalSignal);
         payload.put("technicalScore", technicalScore);
@@ -785,6 +891,7 @@ public class CryptoTradingService {
         payload.put("rules", List.of(
                 "Return only LONG, SHORT, or NO_TRADE.",
                 "Prefer NO_TRADE when futures/whale/news risk conflicts with indicators.",
+                "For LONG, S&P500/SPY must not be risk-off and dollar/DXY proxy must not be strongly up.",
                 "Do not trade during high liquidation/news risk.",
                 "Give probabilities that add to 100."
         ));
@@ -852,6 +959,7 @@ public class CryptoTradingService {
         String liquidationRisk = String.valueOf(payload.get("liquidationRisk"));
         Map<?, ?> market = payload.get("market") instanceof Map<?, ?> m ? m : Map.of();
         Map<?, ?> futures = payload.get("futures") instanceof Map<?, ?> f ? f : Map.of();
+        Map<?, ?> macro = payload.get("macro") instanceof Map<?, ?> x ? x : Map.of();
 
         double change1h = asDouble(market.get("percentChange1h"));
         double change24h = asDouble(market.get("percentChange24h"));
@@ -859,14 +967,20 @@ public class CryptoTradingService {
         double fundingRate = asDouble(futures.get("fundingRate"));
         double longShortRatio = asDouble(futures.get("longShortRatio"));
         double volumeSpike = asDouble(futures.get("volumeSpike"));
+        String macroRisk = String.valueOf(macro.containsKey("macroRisk") ? macro.get("macroRisk") : "UNKNOWN");
+        double sp500Change = asDouble(macro.get("sp500ChangePercent"));
+        double dxyChange = asDouble(macro.get("dxyChangePercent"));
 
         double longScore = 25 + Math.max(0, change1h * 7) + Math.max(0, change24h * 3) + Math.max(0, change7d)
                 + (technicalScore - 50) * 0.45 + (futuresScore - 50) * 0.35 + (volumeScore - 50) * 0.2
-                + (longShortRatio > 1.03 ? 5 : 0) + (volumeSpike > 1.5 ? 4 : 0);
+                + (longShortRatio > 1.03 ? 5 : 0) + (volumeSpike > 1.5 ? 4 : 0)
+                + (sp500Change > 0.35 ? 5 : 0) - (dxyChange > 0.35 ? 6 : 0);
         double shortScore = 25 + Math.max(0, -change1h * 7) + Math.max(0, -change24h * 3) + Math.max(0, -change7d)
                 + ("SHORT".equals(technicalSignal) ? 12 : 0)
-                + (longShortRatio < 0.97 ? 5 : 0) + (fundingRate > 0.0006 ? 4 : 0) + (volumeSpike > 1.8 ? 3 : 0);
+                + (longShortRatio < 0.97 ? 5 : 0) + (fundingRate > 0.0006 ? 4 : 0) + (volumeSpike > 1.8 ? 3 : 0)
+                + (sp500Change < -0.35 ? 5 : 0) + (dxyChange > 0.35 ? 4 : 0);
         double noTradeScore = 30 + ("HIGH".equals(newsRisk) ? 45 : 0) + ("HIGH".equals(liquidationRisk) ? 40 : 0)
+                + ("HIGH".equals(macroRisk) ? 32 : "MEDIUM".equals(macroRisk) ? 12 : 0)
                 + (Math.abs(change24h) < 0.25 ? 14 : 0)
                 + (!"LONG".equals(technicalSignal) && !"SHORT".equals(technicalSignal) ? 18 : 0);
 
@@ -883,7 +997,7 @@ public class CryptoTradingService {
         decision.put("shortChance", shortChance);
         decision.put("noTradeChance", noTradeChance);
         decision.put("confidence", confidence);
-        decision.put("reason", "Local AI scorer: indicators + CMC momentum + Binance futures + whale/news risk.");
+        decision.put("reason", "Local AI scorer: indicators + CMC momentum + Binance futures + whale/news/macro risk.");
         return normalizeAiDecision(decision, "LOCAL_AI");
     }
 
@@ -963,28 +1077,33 @@ public class CryptoTradingService {
         LocalDateTime todayStart = java.time.LocalDate.now().atStartOfDay();
         LocalDateTime weekStart = LocalDateTime.now().minusDays(7);
         LocalDateTime monthStart = LocalDateTime.now().minusDays(30);
-        long total = trades.size();
-        long wins = trades.stream().filter(t -> "PROFIT".equals(t.getStatus())).count();
-        long losses = trades.stream().filter(t -> "LOSS".equals(t.getStatus())).count();
-        long running = trades.stream().filter(t -> "RUNNING".equals(t.getStatus())).count();
-        double pnl = trades.stream().mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).sum();
-        long todayTrades = trades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart)).count();
-        long todayProfitable = trades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart) && "PROFIT".equals(t.getStatus())).count();
-        double todayPnl = trades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart))
+        long cancelledBadData = trades.stream().filter(t -> "CANCELLED_BAD_DATA".equals(t.getStatus())).count();
+        List<CryptoPaperTrade> validTrades = trades.stream()
+                .filter(t -> !"CANCELLED_BAD_DATA".equals(t.getStatus()))
+                .toList();
+        long total = validTrades.size();
+        long wins = validTrades.stream().filter(t -> "PROFIT".equals(t.getStatus())).count();
+        long losses = validTrades.stream().filter(t -> "LOSS".equals(t.getStatus())).count();
+        long running = validTrades.stream().filter(t -> "RUNNING".equals(t.getStatus())).count();
+        double pnl = validTrades.stream().mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).sum();
+        long todayTrades = validTrades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart)).count();
+        long todayProfitable = validTrades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart) && "PROFIT".equals(t.getStatus())).count();
+        double todayPnl = validTrades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart))
                 .mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).sum();
-        double weekPnl = trades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(weekStart))
+        double weekPnl = validTrades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(weekStart))
                 .mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).sum();
-        double monthPnl = trades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(monthStart))
+        double monthPnl = validTrades.stream().filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(monthStart))
                 .mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).sum();
-        double maxLoss = trades.stream().mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).min().orElse(0);
+        double maxLoss = validTrades.stream().mapToDouble(t -> t.getPnl() == null ? 0 : t.getPnl()).min().orElse(0);
         Map<String, Long> aiWins = new LinkedHashMap<>();
-        for (CryptoPaperTrade trade : trades) {
+        for (CryptoPaperTrade trade : validTrades) {
             if ("PROFIT".equals(trade.getStatus())) {
                 aiWins.put(trade.getBestAi(), aiWins.getOrDefault(trade.getBestAi(), 0L) + 1);
             }
         }
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("totalTrades", total);
+        report.put("cancelledBadDataTrades", cancelledBadData);
         report.put("profitableTrades", wins);
         report.put("lossTrades", losses);
         report.put("runningTrades", running);
