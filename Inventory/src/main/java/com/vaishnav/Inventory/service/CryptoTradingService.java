@@ -11,7 +11,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -152,6 +157,7 @@ public class CryptoTradingService {
         intelligence.put("etfFeed", nestedValue(externalFeeds, "etf", "status"));
         intelligence.put("macro", macroStatus);
         intelligence.put("topWhales", nestedValue(externalFeeds, "whales", "items"));
+        intelligence.put("freeWhaleSources", nestedValue(externalFeeds, "whales", "freeSources"));
         intelligence.put("verifiedNews", nestedValue(externalFeeds, "news", "items"));
         intelligence.put("etfFlows", nestedValue(externalFeeds, "etf", "items"));
         intelligence.put("smartMoneyScore", externalFeeds.get("smartMoneyScore"));
@@ -235,7 +241,7 @@ public class CryptoTradingService {
         feeds.put("etf", etf);
         feeds.put("smartMoneyScore", smartMoneyScore);
         feeds.put("externalRisk", externalRisk);
-        feeds.put("sourceNote", "Verified APIs only. Telegram screenshots are not used as truth.");
+        feeds.put("sourceNote", "Free mode uses Google News/RSS + Binance public futures. Paid APIs are optional.");
         cachedExternalFeeds = feeds;
         cachedExternalFeedsAt = Instant.now();
         return feeds;
@@ -245,14 +251,7 @@ public class CryptoTradingService {
         Map<String, Object> feed = new LinkedHashMap<>();
         String apiKey = System.getenv("CRYPTOPANIC_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            feed.put("status", "API_KEY_REQUIRED");
-            feed.put("risk", "UNKNOWN");
-            feed.put("items", List.of(Map.of(
-                    "title", "Add CRYPTOPANIC_API_KEY for verified crypto news.",
-                    "source", "SYSTEM",
-                    "sentiment", "WAITING"
-            )));
-            return feed;
+            return fetchFreeNewsFeed();
         }
 
         try {
@@ -293,6 +292,80 @@ public class CryptoTradingService {
         }
     }
 
+    private Map<String, Object> fetchFreeNewsFeed() {
+        Map<String, Object> feed = new LinkedHashMap<>();
+        try {
+            List<Map<String, Object>> items = new ArrayList<>();
+            items.addAll(fetchGoogleNewsItems("(bitcoin OR ethereum OR solana OR crypto) (ETF OR Fed OR CPI OR SEC OR hack OR war OR liquidity)", "Google News"));
+            items.addAll(fetchGoogleNewsItems("site:coindesk.com (bitcoin OR ethereum OR solana OR crypto)", "CoinDesk"));
+            items.addAll(fetchGoogleNewsItems("site:cointelegraph.com (bitcoin OR ethereum OR solana OR crypto)", "Cointelegraph"));
+            items.addAll(fetchGoogleNewsItems("site:decrypt.co (bitcoin OR ethereum OR solana OR crypto)", "Decrypt"));
+            items.addAll(fetchGoogleNewsItems("site:theblock.co (bitcoin OR ethereum OR solana OR crypto OR ETF)", "The Block"));
+            items = dedupeNews(items).stream().limit(10).toList();
+            int danger = 0;
+            int positive = 0;
+            for (Map<String, Object> item : items) {
+                String sentiment = String.valueOf(item.get("sentiment"));
+                if ("RISK_OFF".equals(sentiment)) danger++;
+                if ("RISK_ON".equals(sentiment)) positive++;
+            }
+            feed.put("status", "FREE_GOOGLE_NEWS_RSS");
+            feed.put("risk", danger >= 2 ? "HIGH" : danger > positive ? "MEDIUM" : "NORMAL");
+            feed.put("items", items);
+            feed.put("rule", "Free news mode: CoinDesk, Cointelegraph, Decrypt, The Block and broad Google News headlines are used as risk filters. Paid CryptoPanic is optional.");
+            return feed;
+        } catch (Exception error) {
+            feed.put("status", "FREE_NEWS_FETCH_FAILED");
+            feed.put("risk", "UNKNOWN");
+            feed.put("items", List.of(Map.of(
+                    "title", "Free news fetch failed. System will rely on price/futures/macro only.",
+                    "source", "SYSTEM",
+                    "sentiment", "WAITING"
+            )));
+            return feed;
+        }
+    }
+
+    private List<Map<String, Object>> fetchGoogleNewsItems(String query, String source) throws Exception {
+        String encoded = query.replace(" ", "%20").replace("(", "%28").replace(")", "%29").replace("|", "%7C");
+        String rss = new RestTemplate().getForObject(
+                "https://news.google.com/rss/search?q=" + encoded + "&hl=en-US&gl=US&ceid=US:en",
+                String.class
+        );
+        return parseRssItems(rss, source);
+    }
+
+    private List<Map<String, Object>> dedupeNews(List<Map<String, Object>> items) {
+        List<Map<String, Object>> unique = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (Map<String, Object> item : items) {
+            String title = String.valueOf(item.getOrDefault("title", "")).toLowerCase(Locale.ROOT);
+            if (title.isBlank() || seen.contains(title)) continue;
+            seen.add(title);
+            unique.add(item);
+        }
+        return unique;
+    }
+
+    private List<Map<String, Object>> parseRssItems(String rss, String source) throws Exception {
+        if (rss == null || rss.isBlank()) return List.of();
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        Document document = factory.newDocumentBuilder().parse(new ByteArrayInputStream(rss.getBytes(StandardCharsets.UTF_8)));
+        NodeList titles = document.getElementsByTagName("title");
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (int i = 1; i < titles.getLength() && items.size() < 8; i++) {
+            String title = titles.item(i).getTextContent();
+            String sentiment = classifyNewsTitle(title);
+            items.add(Map.of(
+                    "title", title,
+                    "source", source,
+                    "sentiment", sentiment
+            ));
+        }
+        return items;
+    }
+
     private Map<String, Object> buildWhaleFlowFeed(Map<String, Map<String, Object>> marketPrices,
                                                    Map<String, Map<String, Object>> futuresIntel) {
         boolean providerReady = hasEnv("WHALE_ALERT_API_KEY") || hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY");
@@ -304,14 +377,17 @@ public class CryptoTradingService {
             double quoteVolume = asDouble(futures.get("quoteVolume24h"));
             double volumeSpike = asDouble(futures.get("volumeSpike"));
             double openInterest = asDouble(futures.get("openInterest"));
+            Map<String, Object> largeTrades = fetchBinanceLargeTrades(symbol);
             String direction = asDouble(futures.get("longShortRatio")) >= 1.04 ? "LONG_CROWD" : asDouble(futures.get("longShortRatio")) <= 0.96 ? "SHORT_CROWD" : "BALANCED";
-            String severity = volumeSpike >= 2.2 || quoteVolume >= 8_000_000_000D ? "HIGH" : volumeSpike >= 1.5 ? "MEDIUM" : "NORMAL";
+            String severity = volumeSpike >= 2.2 || quoteVolume >= 8_000_000_000D || asDouble(largeTrades.get("largeTrades")) >= 12 ? "HIGH" : volumeSpike >= 1.5 || asDouble(largeTrades.get("largeTrades")) >= 5 ? "MEDIUM" : "NORMAL";
             items.add(Map.of(
                     "asset", symbol.replace("USDT", ""),
-                    "flow", String.valueOf(futures.get("whaleProxy")),
+                    "flow", String.valueOf(futures.get("whaleProxy")) + " | large trades " + largeTrades.get("largeTrades") + " | $" + largeTrades.get("largeNotional"),
                     "direction", direction,
                     "severity", severity,
                     "volumeSpike", volumeSpike,
+                    "largeTrades", largeTrades.get("largeTrades"),
+                    "largeNotional", largeTrades.get("largeNotional"),
                     "openInterest", round(openInterest),
                     "volume24h", round(volume24h)
             ));
@@ -320,10 +396,47 @@ public class CryptoTradingService {
         Map<String, Object> feed = new LinkedHashMap<>();
         feed.put("status", providerReady ? "PROVIDER_KEY_READY_PLUS_BINANCE_PROXY" : "BINANCE_PROXY_ONLY_ADD_WHALE_KEYS");
         feed.put("items", items);
+        feed.put("freeSources", List.of(
+                Map.of("name", "Arkham Intelligence", "use", "Manual wallet labels, entity tracking and alerts", "url", "https://intel.arkm.com/"),
+                Map.of("name", "Lookonchain", "use", "Smart money public posts and wallet activity", "url", "https://lookonchain.com/"),
+                Map.of("name", "Whale Alert", "use", "Large public transfers and exchange movement alerts", "url", "https://whale-alert.io/"),
+                Map.of("name", "DeBank", "use", "DeFi whale portfolios and wallet holdings", "url", "https://debank.com/")
+        ));
         feed.put("rule", providerReady
                 ? "Provider keys detected; Binance proxy active. Provider-specific wallet/exchange-flow endpoints can be expanded by plan."
-                : "Using Binance futures large-flow proxy now. Add WHALE_ALERT_API_KEY / GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY for real wallet and exchange inflow/outflow.");
+                : "Free mode: using Binance futures large trades, volume spike, open interest and long/short ratio. Paid on-chain whale APIs are optional.");
         return feed;
+    }
+
+    private Map<String, Object> fetchBinanceLargeTrades(String symbol) {
+        double threshold = switch (symbol) {
+            case "BTCUSDT" -> 250_000D;
+            case "ETHUSDT" -> 120_000D;
+            default -> 60_000D;
+        };
+        try {
+            Object response = new RestTemplate().getForObject(
+                    "https://fapi.binance.com/fapi/v1/aggTrades?symbol=" + symbol + "&limit=1000",
+                    Object.class
+            );
+            int count = 0;
+            double notional = 0;
+            if (response instanceof List<?> trades) {
+                for (Object tradeObj : trades) {
+                    if (!(tradeObj instanceof Map<?, ?> trade)) continue;
+                    double price = parseDouble(trade.get("p"));
+                    double qty = parseDouble(trade.get("q"));
+                    double value = price * qty;
+                    if (value >= threshold) {
+                        count++;
+                        notional += value;
+                    }
+                }
+            }
+            return Map.of("largeTrades", count, "largeNotional", round(notional));
+        } catch (Exception error) {
+            return Map.of("largeTrades", 0, "largeNotional", 0);
+        }
     }
 
     private Map<String, Object> fetchEtfProxyFeed() {
