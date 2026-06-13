@@ -731,6 +731,14 @@ public class CryptoTradingService {
         int volumeScore = liveCmc
                 ? (int) Math.round(Math.max(45, Math.min(92, 55 + Math.log10(Math.max(1, volume24h)) * 3.2)))
                 : 50;
+        Map<String, Object> categoryScores = buildCategoryScores(symbol, marketPrice, futures, indicators, macroStatus, externalFeeds,
+                technicalSignal, technicalScore, futuresScore, volumeScore, smartMoneyScore, newsRisk);
+        String whaleDirection = String.valueOf(categoryScores.get("whaleDirection"));
+        String derivativesDirection = String.valueOf(categoryScores.get("derivativesDirection"));
+        String technicalDirection = String.valueOf(categoryScores.get("technicalDirection"));
+        boolean categoryAligned = !"NO_TRADE".equals(technicalDirection)
+                && technicalDirection.equals(whaleDirection)
+                && technicalDirection.equals(derivativesDirection);
 
         List<Map<String, Object>> aiVotes = liveCmc
                 ? AI_ENGINES.stream().map(ai -> aiVote(ai, symbol, technicalSignal, technicalScore)).toList()
@@ -741,7 +749,7 @@ public class CryptoTradingService {
         long alignedFrames = countMatchingSignals(timeframes, finalSignal);
         double confidence = averageVoteConfidence(aiVotes, finalSignal);
         Map<String, Object> aiDecision = buildAiDecision(symbol, marketPrice, futures, timeframes, technicalSignal,
-                technicalScore, futuresScore, volumeScore, newsRisk, liquidationRisk, macroStatus, externalFeeds);
+                technicalScore, futuresScore, volumeScore, newsRisk, liquidationRisk, macroStatus, externalFeeds, categoryScores);
         finalSignal = String.valueOf(aiDecision.get("signal"));
         confidence = asDouble(aiDecision.get("confidence"));
         aiVotes = aiVotesFromDecision(aiDecision);
@@ -757,12 +765,26 @@ public class CryptoTradingService {
         double takeProfit = "LONG".equals(finalSignal) ? entry + takeDistance : entry - takeDistance;
         double trailingStop = "LONG".equals(finalSignal) ? entry + atr * 0.55 : entry - atr * 0.55;
         double macroScore = "HIGH".equals(macroRisk) ? 25 : "MEDIUM".equals(macroRisk) ? 58 : "NORMAL".equals(macroRisk) ? 85 : 65;
-        double finalScore = Math.round(confidence * 0.28 + technicalScore * 0.22 + volumeScore * 0.13 + futuresScore * 0.13 + ("HIGH".equals(newsRisk) ? 35 : 85) * 0.08 + macroScore * 0.07 + smartMoneyScore * 0.09);
+        double whaleScore = asDouble(categoryScores.get("whaleScore"));
+        double onchainScore = asDouble(categoryScores.get("onchainScore"));
+        double derivativesScore = asDouble(categoryScores.get("derivativesScore"));
+        double weightedTechnicalScore = asDouble(categoryScores.get("technicalScore"));
+        double sentimentScore = asDouble(categoryScores.get("sentimentScore"));
+        double finalScore = Math.round(whaleScore * 0.30
+                + onchainScore * 0.25
+                + derivativesScore * 0.25
+                + weightedTechnicalScore * 0.15
+                + sentimentScore * 0.05);
+        String signalGrade = finalScore >= 80 ? "STRONG"
+                : finalScore >= 70 ? "WATCHLIST"
+                : finalScore >= 60 ? "WEAK"
+                : "NO_TRADE";
         boolean allowed = liveCmc
                 && liveFutures
-                && finalScore >= 75
+                && finalScore >= 80
                 && confidence >= 75
                 && alignedFrames >= 2
+                && categoryAligned
                 && !"NO_TRADE".equals(finalSignal)
                 && !"HIGH".equals(newsRisk)
                 && !"HIGH".equals(liquidationRisk)
@@ -776,6 +798,9 @@ public class CryptoTradingService {
         signal.put("allowed", allowed);
         signal.put("confidence", Math.round(confidence));
         signal.put("finalScore", finalScore);
+        signal.put("signalGrade", signalGrade);
+        signal.put("categoryScores", categoryScores);
+        signal.put("categoryAligned", categoryAligned);
         signal.put("entry", entry);
         signal.put("currentPrice", price);
         signal.put("priceSource", marketPrice.get("source"));
@@ -802,9 +827,10 @@ public class CryptoTradingService {
                 : "LONG=0% SHORT=0% NO_TRADE=100%");
         signal.put("bestAi", aiVotes.get(seed % aiVotes.size()).get("ai"));
         signal.put("indicatorSummary", Map.of("total", INDICATOR_COUNT, "bullish", indicatorBullish, "bearish", INDICATOR_COUNT - indicatorBullish));
-        signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | CMC 1h=" + round(change1h) + "% 24h=" + round(change24h) + "% 7d=" + round(change7d) + "% | futuresScore=" + futuresScore + " | macroRisk=" + macroRisk + " | smartMoney=" + smartMoneyScore + " | whaleProxy=" + futures.get("whaleProxy") + " | RR=" + riskReward);
+        signal.put("scoreFormula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%");
+        signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | Whale=" + Math.round(whaleScore) + " " + whaleDirection + " | On-chain=" + Math.round(onchainScore) + " | Derivatives=" + Math.round(derivativesScore) + " " + derivativesDirection + " | Technical=" + Math.round(weightedTechnicalScore) + " " + technicalDirection + " | Sentiment=" + Math.round(sentimentScore) + " | Grade=" + signalGrade + " | RR=" + riskReward);
         signal.put("newsRisk", newsRisk);
-        signal.put("blockReason", allowed ? "" : blockReason(liveCmc, confidence, alignedFrames, newsRisk, finalScore, finalSignal));
+        signal.put("blockReason", allowed ? "" : blockReason(liveCmc, confidence, alignedFrames, newsRisk, finalScore, finalSignal, categoryAligned));
         return signal;
     }
 
@@ -885,6 +911,91 @@ public class CryptoTradingService {
         value.put("source", "FALLBACK_CMC_KEY_MISSING");
         value.put("warning", "CoinMarketCap API key missing. Set COINMARKETCAP_API_KEY in Render; live signals paused.");
         return value;
+    }
+
+    private Map<String, Object> buildCategoryScores(String symbol,
+                                                    Map<String, Object> marketPrice,
+                                                    Map<String, Object> futures,
+                                                    Map<String, Object> indicators,
+                                                    Map<String, Object> macroStatus,
+                                                    Map<String, Object> externalFeeds,
+                                                    String technicalSignal,
+                                                    int technicalScore,
+                                                    int futuresScore,
+                                                    int volumeScore,
+                                                    int smartMoneyScore,
+                                                    String newsRisk) {
+        double change1h = asDouble(marketPrice.get("percentChange1h"));
+        double change24h = asDouble(marketPrice.get("percentChange24h"));
+        double change7d = asDouble(marketPrice.get("percentChange7d"));
+        double fundingRate = asDouble(futures.get("fundingRate"));
+        double longShortRatio = asDouble(futures.get("longShortRatio"));
+        double volumeSpike = asDouble(futures.get("volumeSpike"));
+        double openInterest = asDouble(futures.get("openInterest"));
+        String macroRisk = String.valueOf(macroStatus.getOrDefault("macroRisk", "UNKNOWN"));
+        String externalRisk = String.valueOf(externalFeeds.getOrDefault("externalRisk", "UNKNOWN"));
+
+        double whaleScore = clampScore(48
+                + smartMoneyScore * 0.28
+                + (volumeSpike >= 2 ? 12 : volumeSpike >= 1.4 ? 6 : 0)
+                + (openInterest > 0 ? 4 : 0)
+                + (longShortRatio >= 1.05 ? 5 : longShortRatio <= 0.95 ? -5 : 0));
+        double onchainScore = clampScore(50
+                + change7d * 1.1
+                + change24h * 1.6
+                + (volumeScore - 50) * 0.35
+                + ("HIGH".equals(externalRisk) ? -12 : "MEDIUM".equals(externalRisk) ? -5 : 4));
+        double derivativesScore = clampScore(futuresScore
+                + (Math.abs(fundingRate) < 0.0004 ? 5 : -6)
+                + (volumeSpike >= 1.5 ? 5 : 0)
+                + (longShortRatio >= 1.08 ? 4 : longShortRatio <= 0.92 ? -4 : 0));
+        double scoreFromIndicators = asDouble(indicators.get("score"));
+        double weightedTechnicalScore = clampScore(technicalScore * 0.55 + scoreFromIndicators * 0.45);
+        double sentimentScore = clampScore(62
+                + ("HIGH".equals(newsRisk) ? -24 : "NORMAL".equals(newsRisk) ? 7 : 0)
+                + ("HIGH".equals(macroRisk) ? -20 : "MEDIUM".equals(macroRisk) ? -8 : "NORMAL".equals(macroRisk) ? 8 : 0));
+
+        Map<String, Object> scores = new LinkedHashMap<>();
+        scores.put("formula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%");
+        scores.put("whaleScore", round(whaleScore));
+        scores.put("onchainScore", round(onchainScore));
+        scores.put("derivativesScore", round(derivativesScore));
+        scores.put("technicalScore", round(weightedTechnicalScore));
+        scores.put("sentimentScore", round(sentimentScore));
+        scores.put("whaleDirection", directionFromScore(whaleScore, change24h, longShortRatio));
+        scores.put("onchainDirection", directionFromScore(onchainScore, change7d, 1));
+        scores.put("derivativesDirection", directionFromScore(derivativesScore, change1h, longShortRatio));
+        scores.put("technicalDirection", "LONG".equals(technicalSignal) || "SHORT".equals(technicalSignal) ? technicalSignal : directionFromScore(weightedTechnicalScore, change24h, 1));
+        scores.put("sentimentDirection", sentimentScore >= 60 ? "LONG" : sentimentScore <= 42 ? "SHORT" : "NO_TRADE");
+        scores.put("indicators", groupedIndicatorNames());
+        scores.put("sources", Map.of(
+                "whale", "Binance large trades + volume spike + optional Arkham/Whale Alert/Glassnode/CryptoQuant",
+                "onchain", "Free proxy from CMC momentum/volume; paid Glassnode/CryptoQuant can improve this",
+                "derivatives", "Binance funding, open interest, long/short, liquidations proxy",
+                "technical", "MA/EMA/RSI/MACD/BB/ATR/VWAP/SR",
+                "sentiment", "Free RSS news + macro SPY/UUP if AlphaVantage key exists"
+        ));
+        return scores;
+    }
+
+    private double clampScore(double value) {
+        return Math.max(0, Math.min(100, value));
+    }
+
+    private String directionFromScore(double score, double momentum, double ratio) {
+        if (score >= 62 && momentum >= -0.15 && ratio >= 0.97) return "LONG";
+        if (score <= 42 || (momentum <= -0.25 && ratio <= 1.03)) return "SHORT";
+        return "NO_TRADE";
+    }
+
+    private Map<String, List<String>> groupedIndicatorNames() {
+        Map<String, List<String>> groups = new LinkedHashMap<>();
+        groups.put("whale", List.of("Whale buy", "Whale sell", "Exchange deposit", "Exchange withdrawal", "Stablecoin transfer", "Smart money accumulation", "Whale wallet balance change", "Dormant wallet movement", "Fund/ETF movement", "Top holder concentration"));
+        groups.put("onchain", List.of("Exchange reserve", "Netflow", "Active addresses", "New addresses", "Transaction count", "MVRV", "SOPR", "NUPL", "Realized price", "Miner reserve"));
+        groups.put("derivatives", List.of("Open interest", "OI change", "Funding rate", "Long/short ratio", "Liquidation long", "Liquidation short", "Taker buy/sell ratio", "Futures premium", "Basis", "Options put/call ratio"));
+        groups.put("technical", List.of("RSI", "MACD", "EMA 20", "EMA 50", "EMA 200", "VWAP", "Bollinger Bands", "ATR", "ADX", "Supertrend"));
+        groups.put("sentiment", List.of("BTC dominance", "Fear & Greed", "Volume spike", "News sentiment", "Social dominance", "DXY", "US yields", "ETF inflow/outflow", "Stablecoin market cap", "Total crypto market cap trend"));
+        return groups;
     }
 
     private Map<String, Map<String, Object>> fetchFuturesIntelligence() {
@@ -1269,13 +1380,15 @@ public class CryptoTradingService {
                                                 String newsRisk,
                                                 String liquidationRisk,
                                                 Map<String, Object> macroStatus,
-                                                Map<String, Object> externalFeeds) {
+                                                Map<String, Object> externalFeeds,
+                                                Map<String, Object> categoryScores) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("symbol", symbol);
         payload.put("market", marketPrice);
         payload.put("futures", futures);
         payload.put("macro", macroStatus);
         payload.put("externalFeeds", externalFeeds);
+        payload.put("categoryScores", categoryScores);
         payload.put("timeframes", timeframes);
         payload.put("technicalSignal", technicalSignal);
         payload.put("technicalScore", technicalScore);
@@ -1283,9 +1396,12 @@ public class CryptoTradingService {
         payload.put("volumeScore", volumeScore);
         payload.put("newsRisk", newsRisk);
         payload.put("liquidationRisk", liquidationRisk);
+        payload.put("finalScoreFormula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%");
         payload.put("rules", List.of(
                 "Return only LONG, SHORT, or NO_TRADE.",
                 "Prefer NO_TRADE when futures/whale/news risk conflicts with indicators.",
+                "Auto trade only when whale, derivatives and technical direction agree.",
+                "80+ score means strong, 70-79 watchlist, 60-69 weak, below 60 no trade.",
                 "For LONG, S&P500/SPY must not be risk-off and dollar/DXY proxy must not be strongly up.",
                 "Use verified news, ETF proxy and whale/exchange-flow context before giving trade probability.",
                 "Do not trade during high liquidation/news risk.",
@@ -1357,6 +1473,7 @@ public class CryptoTradingService {
         Map<?, ?> futures = payload.get("futures") instanceof Map<?, ?> f ? f : Map.of();
         Map<?, ?> macro = payload.get("macro") instanceof Map<?, ?> x ? x : Map.of();
         Map<?, ?> external = payload.get("externalFeeds") instanceof Map<?, ?> e ? e : Map.of();
+        Map<?, ?> category = payload.get("categoryScores") instanceof Map<?, ?> c ? c : Map.of();
 
         double change1h = asDouble(market.get("percentChange1h"));
         double change24h = asDouble(market.get("percentChange24h"));
@@ -1369,20 +1486,41 @@ public class CryptoTradingService {
         double dxyChange = asDouble(macro.get("dxyChangePercent"));
         String externalRisk = String.valueOf(external.containsKey("externalRisk") ? external.get("externalRisk") : "UNKNOWN");
         double smartMoneyScore = asDouble(external.get("smartMoneyScore"));
+        double whaleScore = asDouble(category.get("whaleScore"));
+        double onchainScore = asDouble(category.get("onchainScore"));
+        double derivativesWeightedScore = asDouble(category.get("derivativesScore"));
+        double categoryTechnicalScore = asDouble(category.get("technicalScore"));
+        double sentimentWeightedScore = asDouble(category.get("sentimentScore"));
+        String whaleDirection = String.valueOf(category.containsKey("whaleDirection") ? category.get("whaleDirection") : "NO_TRADE");
+        String derivativesDirection = String.valueOf(category.containsKey("derivativesDirection") ? category.get("derivativesDirection") : "NO_TRADE");
+        String categoryTechnicalDirection = String.valueOf(category.containsKey("technicalDirection") ? category.get("technicalDirection") : "NO_TRADE");
+        boolean categoryAligned = !"NO_TRADE".equals(categoryTechnicalDirection)
+                && categoryTechnicalDirection.equals(whaleDirection)
+                && categoryTechnicalDirection.equals(derivativesDirection);
+        double formulaScore = whaleScore * 0.30 + onchainScore * 0.25 + derivativesWeightedScore * 0.25 + categoryTechnicalScore * 0.15 + sentimentWeightedScore * 0.05;
 
         double longScore = 25 + Math.max(0, change1h * 7) + Math.max(0, change24h * 3) + Math.max(0, change7d)
                 + (technicalScore - 50) * 0.45 + (futuresScore - 50) * 0.35 + (volumeScore - 50) * 0.2
                 + (longShortRatio > 1.03 ? 5 : 0) + (volumeSpike > 1.5 ? 4 : 0)
                 + (sp500Change > 0.35 ? 5 : 0) - (dxyChange > 0.35 ? 6 : 0)
-                + Math.max(0, smartMoneyScore - 60) * 0.25;
+                + Math.max(0, smartMoneyScore - 60) * 0.25
+                + ("LONG".equals(whaleDirection) ? 6 : 0)
+                + ("LONG".equals(derivativesDirection) ? 6 : 0)
+                + ("LONG".equals(categoryTechnicalDirection) ? 6 : 0)
+                + Math.max(0, formulaScore - 70) * 0.25;
         double shortScore = 25 + Math.max(0, -change1h * 7) + Math.max(0, -change24h * 3) + Math.max(0, -change7d)
                 + ("SHORT".equals(technicalSignal) ? 12 : 0)
                 + (longShortRatio < 0.97 ? 5 : 0) + (fundingRate > 0.0006 ? 4 : 0) + (volumeSpike > 1.8 ? 3 : 0)
-                + (sp500Change < -0.35 ? 5 : 0) + (dxyChange > 0.35 ? 4 : 0);
+                + (sp500Change < -0.35 ? 5 : 0) + (dxyChange > 0.35 ? 4 : 0)
+                + ("SHORT".equals(whaleDirection) ? 6 : 0)
+                + ("SHORT".equals(derivativesDirection) ? 6 : 0)
+                + ("SHORT".equals(categoryTechnicalDirection) ? 6 : 0);
         double noTradeScore = 30 + ("HIGH".equals(newsRisk) ? 45 : 0) + ("HIGH".equals(liquidationRisk) ? 40 : 0)
                 + ("HIGH".equals(macroRisk) ? 32 : "MEDIUM".equals(macroRisk) ? 12 : 0)
                 + ("HIGH".equals(externalRisk) ? 35 : "MEDIUM".equals(externalRisk) ? 12 : 0)
                 + (smartMoneyScore < 45 ? 14 : 0)
+                + (!categoryAligned ? 24 : 0)
+                + (formulaScore < 70 ? 14 : 0)
                 + (Math.abs(change24h) < 0.25 ? 14 : 0)
                 + (!"LONG".equals(technicalSignal) && !"SHORT".equals(technicalSignal) ? 18 : 0);
 
@@ -1399,7 +1537,7 @@ public class CryptoTradingService {
         decision.put("shortChance", shortChance);
         decision.put("noTradeChance", noTradeChance);
         decision.put("confidence", confidence);
-        decision.put("reason", "Local AI scorer: indicators + CMC momentum + Binance futures + verified news + ETF/macro + whale-flow risk.");
+        decision.put("reason", "Local AI scorer: 50-indicator formula + category alignment + CMC momentum + Binance futures + verified/free news + ETF/macro + whale-flow risk.");
         return normalizeAiDecision(decision, "LOCAL_AI");
     }
 
@@ -1539,16 +1677,17 @@ public class CryptoTradingService {
     }
 
     private String blockReason(double confidence, long longFrames, String newsRisk, double finalScore) {
-        return blockReason(true, confidence, longFrames, newsRisk, finalScore, "");
+        return blockReason(true, confidence, longFrames, newsRisk, finalScore, "", true);
     }
 
-    private String blockReason(boolean liveCmc, double confidence, long alignedFrames, String newsRisk, double finalScore, String finalSignal) {
+    private String blockReason(boolean liveCmc, double confidence, long alignedFrames, String newsRisk, double finalScore, String finalSignal, boolean categoryAligned) {
         if (!liveCmc) return "CoinMarketCap live API key missing";
         if (confidence < 75) return "AI confidence below 75";
         if ("NO_TRADE".equals(finalSignal)) return "CMC momentum is neutral";
         if (alignedFrames < 2) return "Multi-timeframe not aligned";
+        if (!categoryAligned) return "Whale + derivatives + technical direction not aligned";
         if ("HIGH".equals(newsRisk)) return "High news risk";
-        if (finalScore < 75) return "Final accuracy score below 75";
+        if (finalScore < 80) return "Final 50-indicator score below 80";
         return "Risk rule blocked";
     }
 

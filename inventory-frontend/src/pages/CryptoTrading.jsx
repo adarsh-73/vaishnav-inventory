@@ -306,7 +306,15 @@ function CryptoTrading() {
             <Info label="Updated" value={formatUpdated(selectedPlan.lastUpdated)} />
             <Info label="Position Size" value={`${selectedPlan.positionSize.toFixed(4)} ${selectedPlan.symbol}`} />
             <Info label="Risk Amount" value={formatUsd(selectedPlan.riskAmount)} danger />
+            <Info label="Signal Grade" value={selectedPlan.signalGrade || "WAIT"} strong />
+            <Info label="Category Align" value={selectedPlan.categoryAligned ? "YES" : "NO"} good={selectedPlan.categoryAligned} danger={!selectedPlan.categoryAligned} />
+            <Info label="Whale 30%" value={`${scoreValue(selectedPlan.categoryScores?.whaleScore)} ${selectedPlan.categoryScores?.whaleDirection || ""}`} />
+            <Info label="On-chain 25%" value={`${scoreValue(selectedPlan.categoryScores?.onchainScore)} ${selectedPlan.categoryScores?.onchainDirection || ""}`} />
+            <Info label="Derivatives 25%" value={`${scoreValue(selectedPlan.categoryScores?.derivativesScore)} ${selectedPlan.categoryScores?.derivativesDirection || ""}`} />
+            <Info label="Technical 15%" value={`${scoreValue(selectedPlan.categoryScores?.technicalScore)} ${selectedPlan.categoryScores?.technicalDirection || ""}`} />
+            <Info label="Sentiment 5%" value={`${scoreValue(selectedPlan.categoryScores?.sentimentScore)} ${selectedPlan.categoryScores?.sentimentDirection || ""}`} />
           </div>
+          <div style={formulaNote}>{selectedPlan.categoryScores?.formula || "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%"}</div>
           <div style={ruleList}>
             {selectedPlan.rules.map((rule) => (
               <div key={rule.name} style={rule.pass ? ruleOk : ruleBad}>
@@ -530,6 +538,9 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
       longChance: Number(signal.aiDecision?.longChance || 0),
       shortChance: Number(signal.aiDecision?.shortChance || 0),
       noTradeChance: Number(signal.aiDecision?.noTradeChance || 100),
+      signalGrade: signal.signalGrade || "WAIT",
+      categoryAligned: Boolean(signal.categoryAligned),
+      categoryScores: signal.categoryScores || fallbackPlan.categoryScores,
       aiReason: signal.aiDecision?.reason || "",
       aiSource: signal.aiDecision?.source || "",
       indicators: signal.technicalIndicators || {},
@@ -638,6 +649,21 @@ function buildPlan(symbol, settings) {
     noTradeChance: 100,
     aiReason: "Waiting for backend AI payload",
     aiSource: "WAITING",
+    signalGrade: "WAIT",
+    categoryAligned: false,
+    categoryScores: {
+      formula: "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%",
+      whaleScore: 0,
+      onchainScore: 0,
+      derivativesScore: 0,
+      technicalScore: 0,
+      sentimentScore: 0,
+      whaleDirection: "WAIT",
+      onchainDirection: "WAIT",
+      derivativesDirection: "WAIT",
+      technicalDirection: "WAIT",
+      sentimentDirection: "WAIT"
+    },
     indicators: {},
     percentChange1h: 0,
     percentChange24h: 0,
@@ -690,6 +716,10 @@ function formatPercent(value) {
 
 function formatPercentPlain(value) {
   return `${Number(value || 0).toFixed(0)}%`;
+}
+
+function scoreValue(value) {
+  return `${Math.round(Number(value || 0))}%`;
 }
 
 function formatUpdated(value) {
@@ -784,6 +814,7 @@ const profitTd = { ...tdStyle, color: "#15803d", fontWeight: "900" };
 const lossTd = { ...tdStyle, color: "#b91c1c", fontWeight: "900" };
 const orderGrid = { padding: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" };
 const infoCard = { border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "8px", padding: "10px", display: "grid", gap: "5px", color: "#64748b", fontSize: "12px", fontWeight: "900", textTransform: "uppercase" };
+const formulaNote = { margin: "0 16px 14px", padding: "10px", border: "1px solid #dbeafe", background: "#eff6ff", color: "#0f2963", borderRadius: "8px", fontSize: "13px", fontWeight: "900" };
 const ruleList = { padding: "0 16px 16px", display: "grid", gap: "9px" };
 const ruleOk = { border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#166534", borderRadius: "8px", padding: "10px", display: "flex", gap: "10px" };
 const ruleBad = { border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: "8px", padding: "10px", display: "flex", gap: "10px" };
