@@ -23,8 +23,6 @@ public class InvoiceItem {
 
     private String itemCategory;
 
-    private Boolean autoCreateProduct;
-
     private Integer quantity;
 
     private Integer returnedQuantity;
@@ -34,14 +32,6 @@ public class InvoiceItem {
     private java.time.LocalDateTime returnDate;
 
     private Double sellPrice;
-
-    private Double purchasePrice;
-
-    private String stockBrand;
-
-    private String stockCategory;
-
-    private String stockLocation;
 
     private Double totalPrice;
 

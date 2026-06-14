@@ -32,6 +32,14 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+
+
+        <dependency>
+    <groupId>org.ta4j</groupId>
+    <artifactId>ta4j-core</artifactId>
+    <version>0.18</version>
+</dependency>
+
         <!-- Spring Boot JPA -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

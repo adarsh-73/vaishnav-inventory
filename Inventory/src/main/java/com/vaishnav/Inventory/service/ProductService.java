@@ -30,7 +30,12 @@ public class ProductService {
 
     // Add Product
     public product addProduct(product productData) {
-        normalizeProduct(productData);
+
+        // duplicate barcode check
+        if (productData.getBarcode() != null &&
+                productRepository.existsByBarcode(productData.getBarcode())) {
+            throw new RuntimeException("Product with this barcode already exists");
+        }
 
         // default stock
         if (productData.getQuantity() == null) {
@@ -40,8 +45,6 @@ public class ProductService {
         if (productData.getMinimumStock() == null) {
             productData.setMinimumStock(1);
         }
-
-        ensureUniqueNewProductCode(productData);
 
         return productRepository.save(productData);
     }
@@ -114,13 +117,8 @@ public class ProductService {
         if (updatedProduct.getCategory() != null)
             existingProduct.setCategory(updatedProduct.getCategory());
 
-        if (updatedProduct.getBarcode() != null) {
-            String barcode = clean(updatedProduct.getBarcode());
-            if (barcode != null && productRepository.existsByBarcodeAndIdNot(barcode, id)) {
-                throw new IllegalArgumentException("Barcode already kisi aur product me hai. Barcode change karo ya blank chhod do.");
-            }
+        if (updatedProduct.getBarcode() != null)
             existingProduct.setBarcode(updatedProduct.getBarcode());
-        }
 
         if (updatedProduct.getQuantity() != null)
             existingProduct.setQuantity(updatedProduct.getQuantity());
@@ -144,61 +142,7 @@ public class ProductService {
     }
 
     // Low Stock Products
-public List<product> getLowStockProducts() {
+    public List<product> getLowStockProducts() {
     return productRepository.findLowStockProducts();
 }
-
-    private void normalizeProduct(product productData) {
-        productData.setProductName(clean(productData.getProductName()));
-        productData.setBrand(clean(productData.getBrand()));
-        productData.setMake(clean(productData.getMake()));
-        productData.setModel(clean(productData.getModel()));
-        productData.setSerialNumber(clean(productData.getSerialNumber()));
-        productData.setCategory(clean(productData.getCategory()));
-        productData.setBarcode(clean(productData.getBarcode()));
-        productData.setProductLocation(clean(productData.getProductLocation()));
-        productData.setDescription(clean(productData.getDescription()));
-    }
-
-    private String clean(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim();
-        return trimmed.isBlank() ? null : trimmed;
-    }
-
-    private void ensureUniqueNewProductCode(product productData) {
-        String barcode = productData.getBarcode();
-        if (barcode != null && !productRepository.existsByBarcode(barcode)) return;
-
-        String nextCode = nextProductCode();
-        productData.setBarcode(nextCode);
-        if (productData.getSerialNumber() == null || productData.getSerialNumber().isBlank() || barcode != null) {
-            productData.setSerialNumber(nextCode);
-        }
-    }
-
-    private String nextProductCode() {
-        int maxCode = productRepository.findAll().stream()
-                .mapToInt(item -> Math.max(numberFrom(item.getSerialNumber()), numberFrom(item.getBarcode())))
-                .max()
-                .orElse(0);
-
-        String code;
-        do {
-            maxCode++;
-            code = String.valueOf(maxCode);
-        } while (productRepository.existsByBarcode(code));
-        return code;
-    }
-
-    private int numberFrom(String value) {
-        if (value == null) return 0;
-        String digits = value.replaceAll("\\D", "");
-        if (digits.isBlank()) return 0;
-        try {
-            return Integer.parseInt(digits);
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
-    }
 }

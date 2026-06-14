@@ -25,11 +25,6 @@ public class CryptoTradingController {
         return cryptoTradingService.getDashboard();
     }
 
-    @GetMapping("/fear-greed")
-    public Map<String, Object> fearGreed() {
-        return cryptoTradingService.getFearGreedDirect();
-    }
-
     @PostMapping("/paper-scan")
     public List<CryptoPaperTrade> paperScan() {
         return cryptoTradingService.runPaperScan();
@@ -38,11 +33,6 @@ public class CryptoTradingController {
     @PostMapping("/close-running")
     public List<CryptoPaperTrade> closeRunning() {
         return cryptoTradingService.closeRunningTrades();
-    }
-
-    @PostMapping("/cleanup-bad-data")
-    public Map<String, Object> cleanupBadData() {
-        return cryptoTradingService.cleanupBadFallbackTrades();
     }
 
     @GetMapping("/binance/status")
