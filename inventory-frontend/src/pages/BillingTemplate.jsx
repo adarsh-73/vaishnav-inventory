@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { todayDate } from '../utils/storage';
 import { API_BASE, getInvoiceBusinessCategory, getInvoiceCategoryTotals, inferInvoiceItemCategory, isServiceText } from '../utils/api';
 
 export default function VaishnavFinalInvoice() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [customerName, setCustomerName] = useState("");
   const [mobileNo, setMobileNo] = useState("");
@@ -408,17 +409,37 @@ export default function VaishnavFinalInvoice() {
 
     const loadInvoiceFromUrl = async () => {
       try {
+        const stateInvoice = location.state?.invoice;
+        if (stateInvoice && String(stateInvoice.id || "") === String(invoiceId)) {
+          loadInvoiceForEdit(stateInvoice);
+          return;
+        }
+
         const response = await fetch(`${API_BASE}/invoices/${invoiceId}`);
-        if (!response.ok) throw new Error("Bill edit ke liye load nahi hua");
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `Bill edit ke liye load nahi hua (${response.status})`);
+        }
         const invoice = await response.json();
         loadInvoiceForEdit(invoice);
       } catch (error) {
-        alert(`Bill edit load error: ${error.message}`);
+        try {
+          const fallbackResponse = await fetch(`${API_BASE}/invoices`);
+          if (!fallbackResponse.ok) throw error;
+          const list = await fallbackResponse.json();
+          const fallbackInvoice = Array.isArray(list)
+            ? list.find((invoice) => String(invoice.id || "") === String(invoiceId))
+            : null;
+          if (!fallbackInvoice) throw error;
+          loadInvoiceForEdit(fallbackInvoice);
+        } catch {
+          alert(`Bill edit load error: ${error.message}`);
+        }
       }
     };
 
     loadInvoiceFromUrl();
-  }, [searchParams, editingInvoiceId]);
+  }, [searchParams, editingInvoiceId, location.state]);
 
   const handleDeleteInvoice = async (invoice) => {
     const confirmed = window.confirm(`Bill ${invoice.invoiceNumber || invoice.id} delete karna hai? Stock restore hoga aur daily-book income entry bhi remove hogi.`);

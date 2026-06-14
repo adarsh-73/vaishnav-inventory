@@ -194,7 +194,7 @@ function OldBills() {
   };
 
   const handleEditBill = (invoice) => {
-    navigate(`/billing?invoiceId=${invoice.id}`);
+    navigate(`/billing?invoiceId=${invoice.id}`, { state: { invoice } });
   };
 
   const handleDeleteBill = async (invoice) => {
