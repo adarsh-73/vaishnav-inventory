@@ -13,6 +13,8 @@ export default function VaishnavFinalInvoice() {
   const [billDate, setBillDate] = useState(todayDate());
   const [businessCategory, setBusinessCategory] = useState("accessories");
   const [paidAmount, setPaidAmount] = useState("");
+  const [discountAmount, setDiscountAmount] = useState("");
+  const [discountNote, setDiscountNote] = useState("");
   const [editingInvoiceId, setEditingInvoiceId] = useState(null);
   const [invoiceHistory, setInvoiceHistory] = useState([]);
 
@@ -21,6 +23,7 @@ export default function VaishnavFinalInvoice() {
   const [newDesc, setNewDesc] = useState("");
   const [newQty, setNewQty] = useState("");
   const [newRate, setNewRate] = useState("");
+  const [newPurchasePrice, setNewPurchasePrice] = useState("");
   const [newItemMode, setNewItemMode] = useState("manual_accessory");
   const [editingItemId, setEditingItemId] = useState(null);
   const [backendProducts, setBackendProducts] = useState([]);
@@ -79,15 +82,28 @@ export default function VaishnavFinalInvoice() {
 
     if (!desc || !newQty || !rate) return;
     const manualCategory = !selectedProduct && (newItemMode === "service" || isServiceText(desc)) ? "service" : "accessories";
+    const itemCategory = selectedProduct
+      ? "inventory_accessory"
+      : newItemMode === "service"
+        ? "service"
+        : newItemMode === "old_accessory"
+          ? "old_accessory"
+          : newItemMode === "direct_stock"
+            ? "direct_stock_accessory"
+            : manualCategory === "service"
+              ? "service"
+              : "manual_accessory";
     const nextItem = {
       id: editingItemId || Date.now(),
       productId: selectedProduct?.id,
       desc,
       identity: selectedProduct ? getProductIdentity(selectedProduct) : "",
-      category: selectedProduct ? "accessories" : manualCategory,
-      itemCategory: selectedProduct ? "inventory_accessory" : manualCategory === "service" ? "service" : "manual_accessory",
+      category: itemCategory === "service" ? "service" : itemCategory === "old_accessory" ? "old_accessories" : "accessories",
+      itemCategory,
       qty: Number(newQty),
-      rate: Number(rate)
+      rate: Number(rate),
+      purchasePrice: Number(newPurchasePrice || selectedProduct?.purchasePrice || 0),
+      autoCreateProduct: itemCategory === "direct_stock_accessory"
     };
     setItems(editingItemId ? items.map((item) => item.id === editingItemId ? nextItem : item) : [...items, nextItem]);
     setEditingItemId(null);
@@ -96,11 +112,14 @@ export default function VaishnavFinalInvoice() {
     setNewDesc("");
     setNewQty("");
     setNewRate("");
+    setNewPurchasePrice("");
     setNewItemMode("manual_accessory");
   };
 
-  const totalAmount = items.reduce((sum, item) => sum + (item.qty * item.rate), 0);
-  const billSplit = useMemo(() => getInvoiceCategoryTotals({ items }), [items]);
+  const subTotalAmount = items.reduce((sum, item) => sum + (item.qty * item.rate), 0);
+  const discountValue = Math.min(Number(discountAmount || 0), subTotalAmount);
+  const totalAmount = Math.max(0, subTotalAmount - discountValue);
+  const billSplit = useMemo(() => getInvoiceCategoryTotals({ items, discountAmount: discountValue }), [items, discountValue]);
   const paidValue = paidAmount === "" ? totalAmount : Number(paidAmount || 0);
   const remainingAmount = Math.max(totalAmount - paidValue, 0);
 
@@ -190,13 +209,15 @@ export default function VaishnavFinalInvoice() {
       "",
       itemLines || "No items added",
       "",
+      `Subtotal: Rs. ${subTotalAmount}/-`,
+      discountValue > 0 ? `Discount: Rs. ${discountValue}/-` : "",
       `Total Amount: Rs. ${totalAmount}/-`,
       `Paid: Rs. ${paidValue}/-`,
       `Balance: Rs. ${remainingAmount}/-`,
       "",
       "Thank you for choosing Vaishnav."
     ].join("\n");
-  }, [billDate, billNo, customerName, items, mobileNo, paidValue, remainingAmount, totalAmount, vehicleNo]);
+  }, [billDate, billNo, customerName, discountValue, items, mobileNo, paidValue, remainingAmount, subTotalAmount, totalAmount, vehicleNo]);
 
   const handleWhatsAppSend = async () => {
     const cleanMobile = mobileNo.replace(/\D/g, '');
@@ -228,15 +249,20 @@ export default function VaishnavFinalInvoice() {
   };
 
   const buildInvoicePayload = (nextItems = items) => {
-    const nextTotalAmount = nextItems.reduce((sum, item) => sum + (item.qty * item.rate), 0);
+    const nextSubTotalAmount = nextItems.reduce((sum, item) => sum + (item.qty * item.rate), 0);
+    const nextDiscountValue = Math.min(Number(discountAmount || 0), nextSubTotalAmount);
+    const nextTotalAmount = Math.max(0, nextSubTotalAmount - nextDiscountValue);
     const nextPaidValue = paidAmount === "" ? nextTotalAmount : Number(paidAmount || 0);
     const nextRemainingAmount = Math.max(nextTotalAmount - nextPaidValue, 0);
     const invoiceItemsPayload = nextItems.map((item) => ({
       productInvoiceitem: item.productId ? { id: item.productId } : null,
       description: item.desc,
-      itemCategory: item.productId ? "inventory_accessory" : (item.category === "service" || isServiceText(item.desc)) ? "service" : "manual_accessory",
+      itemCategory: item.itemCategory || (item.productId ? "inventory_accessory" : (item.category === "service" || isServiceText(item.desc)) ? "service" : "manual_accessory"),
+      autoCreateProduct: Boolean(item.autoCreateProduct),
       quantity: item.qty,
-      sellPrice: item.rate
+      sellPrice: item.rate,
+      purchasePrice: Number(item.purchasePrice || 0),
+      stockCategory: "Accessories"
     }));
     const inferredBusinessCategory = invoiceItemsPayload.length > 0
       ? getInvoiceBusinessCategory({ invoiceItems: invoiceItemsPayload })
@@ -254,6 +280,8 @@ export default function VaishnavFinalInvoice() {
       paymentMethod: "CASH/UPI",
       businessCategory: inferredBusinessCategory,
       totalAmount: nextTotalAmount,
+      discountAmount: nextDiscountValue,
+      discountNote: discountNote || null,
       invoiceItems: invoiceItemsPayload
     };
   };
@@ -300,6 +328,7 @@ export default function VaishnavFinalInvoice() {
     setNewDesc(item.desc);
     setNewQty(String(item.qty));
     setNewRate(String(item.rate));
+    setNewPurchasePrice(item.purchasePrice ? String(item.purchasePrice) : "");
   };
 
   const deleteItem = async (id) => {
@@ -332,6 +361,8 @@ export default function VaishnavFinalInvoice() {
     setMobileNo("");
     setVehicleNo("");
     setBusinessCategory("accessories");
+    setDiscountAmount("");
+    setDiscountNote("");
     setItems([]);
     setEditingItemId(null);
     setEditingInvoiceId(null);
@@ -340,6 +371,7 @@ export default function VaishnavFinalInvoice() {
     setNewDesc("");
     setNewQty("");
     setNewRate("");
+    setNewPurchasePrice("");
     setNewItemMode("manual_accessory");
     setPaidAmount("");
   };
@@ -353,15 +385,19 @@ export default function VaishnavFinalInvoice() {
     setVehicleNo(invoice.vehicleNumber || "");
     setBusinessCategory(invoice.businessCategory || "accessories");
     setPaidAmount(invoice.paidAmount ?? invoice.totalAmount ?? "");
+    setDiscountAmount(invoice.discountAmount ? String(invoice.discountAmount) : "");
+    setDiscountNote(invoice.discountNote || "");
     setItems((invoice.invoiceItems || []).map((item) => ({
       id: item.id || Date.now() + Math.random(),
       productId: item.productInvoiceitem?.id,
       desc: item.description || item.productInvoiceitem?.productName || "Item",
       identity: item.productInvoiceitem ? getProductIdentity(item.productInvoiceitem) : "",
       category: inferInvoiceItemCategory(item),
-      itemCategory: item.productInvoiceitem ? "inventory_accessory" : inferInvoiceItemCategory(item) === "service" ? "service" : "manual_accessory",
+      itemCategory: item.itemCategory || (item.productInvoiceitem ? "inventory_accessory" : inferInvoiceItemCategory(item) === "service" ? "service" : "manual_accessory"),
       qty: Number(item.quantity || 0),
-      rate: Number(item.sellPrice || item.productInvoiceitem?.sellPrice || 0)
+      rate: Number(item.sellPrice || item.productInvoiceitem?.sellPrice || 0),
+      purchasePrice: Number(item.purchasePrice || item.productInvoiceitem?.purchasePrice || 0),
+      autoCreateProduct: Boolean(item.autoCreateProduct)
     })));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -472,11 +508,15 @@ export default function VaishnavFinalInvoice() {
             <option value="washing">Auto Split: Service/Labour</option>
           </select>
           <input type="number" placeholder="Paid Amount" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} style={styles.panelInput} />
+          <input type="number" placeholder="Discount (optional)" value={discountAmount} onChange={e => setDiscountAmount(e.target.value)} style={styles.panelInput} />
+          <input type="text" placeholder="Discount note (optional)" value={discountNote} onChange={e => setDiscountNote(e.target.value)} style={styles.panelInput} />
         </div>
         <div style={styles.splitSummaryBar}>
           <span>Washing/Labour: ₹ {billSplit.serviceProfit}</span>
           <span>Accessories Sale: ₹ {billSplit.accessories}</span>
           <span>Accessories Profit: ₹ {billSplit.accessoriesProfit}</span>
+          <span>Old Accessories: ₹ {billSplit.oldAccessoriesProfit}</span>
+          <span>Discount: ₹ {discountValue}</span>
           <span>Detected: {getInvoiceBusinessCategory({ items })}</span>
         </div>
         <form onSubmit={handleAddItem} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -488,6 +528,8 @@ export default function VaishnavFinalInvoice() {
             }
           }} style={{ ...styles.panelInput, flex: 1.4 }}>
             <option value="manual_accessory">Manual Accessories Bill (No Stock Out)</option>
+            <option value="direct_stock">Direct Stock Add + Sell</option>
+            <option value="old_accessory">Old Accessories Earning</option>
             <option value="service">Manual Washing/Labour</option>
             <option value="inventory">Inventory Product (Stock Out)</option>
           </select>
@@ -535,6 +577,9 @@ export default function VaishnavFinalInvoice() {
           }} style={{ ...styles.panelInput, flex: 3 }} />
           <input type="number" placeholder="Qty" value={newQty} onChange={e => setNewQty(e.target.value)} style={{ ...styles.panelInput, flex: 1 }} />
           <input type="number" placeholder="Rate" value={newRate} onChange={e => setNewRate(e.target.value)} style={{ ...styles.panelInput, flex: 1 }} />
+          {(newItemMode === "direct_stock" || newItemMode === "manual_accessory") && (
+            <input type="number" placeholder="Buy Price" value={newPurchasePrice} onChange={e => setNewPurchasePrice(e.target.value)} style={{ ...styles.panelInput, flex: 1 }} />
+          )}
           <button type="submit" style={styles.insertRowBtn}>{editingItemId ? "Update Item" : "+ Add Item"}</button>
         </form>
         <div style={styles.qrControlsRow}>
@@ -659,7 +704,7 @@ export default function VaishnavFinalInvoice() {
                     {item.desc}
                     {item.identity && <div style={styles.itemIdentityText}>{item.identity}</div>}
                     <div className="no-print" style={item.category === "service" ? styles.serviceTag : styles.accessoryTag}>
-                      {item.category === "service" ? "Washing/Labour" : item.productId ? "Inventory Stock Out" : "Manual Accessories"}
+                      {item.category === "service" ? "Washing/Labour" : item.itemCategory === "old_accessory" ? "Old Accessories" : item.productId ? "Inventory Stock Out" : item.autoCreateProduct ? "Auto Stock + Sold" : "Manual Accessories"}
                     </div>
                   </td>
                   <td style={{ ...styles.tdCell, textAlign: 'center' }}>{item.qty}</td>
@@ -683,6 +728,10 @@ export default function VaishnavFinalInvoice() {
             </tbody>
           </table>
           <div style={styles.tableBottomSummaryBlock}>
+            <div style={styles.totalStack}>
+              <div style={styles.totalLine}><span>Subtotal</span><strong>₹ {subTotalAmount}</strong></div>
+              {discountValue > 0 && <div style={styles.discountLine}><span>Discount{discountNote ? ` (${discountNote})` : ""}</span><strong>- ₹ {discountValue}</strong></div>}
+            </div>
             <div style={styles.totalLabelBlockBackgroundCell}>TOTAL AMOUNT</div>
             <div style={styles.totalValueDisplayDigits}>₹ {totalAmount}</div>
           </div>
@@ -833,6 +882,8 @@ function getProductSearchText(product) {
 function getManualModeForItem(item) {
   if (item?.productId) return "inventory";
   if (item?.category === "service" || item?.itemCategory === "service" || isServiceText(item?.desc)) return "service";
+  if (item?.itemCategory === "old_accessory" || item?.category === "old_accessories") return "old_accessory";
+  if (item?.autoCreateProduct || item?.itemCategory === "direct_stock_accessory") return "direct_stock";
   return "manual_accessory";
 }
 
@@ -903,6 +954,9 @@ const styles = {
   serviceTag: { display: 'inline-block', marginTop: '4px', background: '#ECFDF5', color: '#047857', border: '1px solid #A7F3D0', borderRadius: '999px', padding: '2px 7px', fontSize: '9px', fontWeight: '900' },
   accessoryTag: { display: 'inline-block', marginTop: '4px', background: '#EFF6FF', color: '#0F2963', border: '1px solid #BFDBFE', borderRadius: '999px', padding: '2px 7px', fontSize: '9px', fontWeight: '900' },
   tableBottomSummaryBlock: { display: 'flex', justifyContent: 'flex-end', borderTop: '2px solid #0F2963', position: 'relative', zIndex: 2, backgroundColor: '#FFF' },
+  totalStack: { minWidth: '190px', padding: '7px 14px', borderLeft: '1px solid #CBD5E1', fontSize: '11px', color: '#0F2963', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '3px' },
+  totalLine: { display: 'flex', justifyContent: 'space-between', gap: '18px', fontWeight: 'bold' },
+  discountLine: { display: 'flex', justifyContent: 'space-between', gap: '18px', color: '#B91C1C', fontWeight: 'bold' },
   paymentSummaryLine: { display: 'flex', justifyContent: 'flex-end', gap: '28px', padding: '8px 18px', fontSize: '12px', fontWeight: 'bold', color: '#0F2963', borderTop: '1px solid #CBD5E1', position: 'relative', zIndex: 2, backgroundColor: '#F8FAFC' },
   totalLabelBlockBackgroundCell: { backgroundColor: '#0F2963', color: '#FFFFFF', fontWeight: 'bold', fontSize: '11px', padding: '12px 24px', width: '130px', textAlign: 'center' },
   totalValueDisplayDigits: { width: '140px', textAlign: 'center', fontSize: '20px', fontWeight: '900', color: '#0F2963', alignSelf: 'center' },

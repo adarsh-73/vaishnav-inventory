@@ -238,6 +238,7 @@ function CryptoTrading() {
         <div style={feedGrid}>
           <FeedList title="Whale / Exchange Flow" status={dashboard.intelligence?.whaleFeed} items={dashboard.intelligence?.topWhales} />
           <FeedList title="Verified News" status={dashboard.intelligence?.newsFeed} items={dashboard.intelligence?.verifiedNews} />
+          <FeedList title="X / Twitter Crypto Feed" status={dashboard.intelligence?.twitterFeed} items={dashboard.intelligence?.twitterItems} />
           <FeedList title="Macro Crisis Radar" status={dashboard.intelligence?.macro?.macroRisk} items={buildMacroFeedItems(dashboard.intelligence?.macro)} />
           <FeedList title="Source Radar" status={dashboard.intelligence?.sourceRadarStatus} items={dashboard.intelligence?.sourceRadar} />
           <FeedList title="ETF Rotation Proxy" status={dashboard.intelligence?.etfFeed} items={dashboard.intelligence?.etfFlows} />
@@ -500,6 +501,7 @@ function FeedList({ title, status, items }) {
             <span style={feedAsset}>{item.asset || item.source || item.status || "Feed"}</span>
             <strong style={feedSignal(item.sentiment || item.signal || item.severity)}>{item.sentiment || item.signal || item.severity || item.direction || "INFO"}</strong>
             <small>{item.title || item.flow || item.message || item.rule || "-"}</small>
+            {item.url && <a href={item.url} target="_blank" rel="noreferrer" style={feedLink}>Open source</a>}
           </div>
         ))}
         {rows.length === 0 && <div style={feedEmpty}>API data ka wait hai.</div>}
@@ -577,6 +579,8 @@ function buildDashboard(settings) {
       newsFeed: "WAITING",
       etfFeed: "WAITING",
       topWhales: [],
+      twitterFeed: "WAITING",
+      twitterItems: [],
       sourceRadar: [],
       sourceRadarStatus: "WAITING",
       freeWhaleSources: [],
@@ -911,6 +915,7 @@ const feedStatus = { fontSize: "11px", fontWeight: "900", color: "#64748b", text
 const feedRows = { display: "grid" };
 const feedRow = { display: "grid", gap: "5px", padding: "11px 12px", borderBottom: "1px solid #e2e8f0", color: "#334155" };
 const feedAsset = { fontSize: "12px", color: "#64748b", fontWeight: "900", textTransform: "uppercase" };
+const feedLink = { color: "#0f2963", fontWeight: "900", fontSize: "11px", textDecoration: "underline" };
 const feedEmpty = { padding: "14px", color: "#94a3b8", fontWeight: "800", textAlign: "center" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
 const tableWrap = { width: "100%", overflowX: "auto" };

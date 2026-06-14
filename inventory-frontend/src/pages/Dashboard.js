@@ -56,6 +56,7 @@ function Dashboard() {
   const profitBreakdown = [
     { label: "Washing / Labour Profit", note: "Washing, service aur labour income", amount: washingProfit, type: "plus" },
     { label: "Accessories Profit", note: "Selling price minus purchase price", amount: totals.accessoriesProfit, type: "plus" },
+    { label: "Old Accessories Earning", note: "Purane saman ki direct earning", amount: totals.oldAccessoriesProfit, type: "plus" },
     { label: "Gross Profit", note: "Washing + accessories profit", amount: grossProfit, type: "total" },
     { label: "Paid Daily Expense", note: "Sirf paid kharch minus hoga, udhar alag rahega", amount: totals.expense, type: "minus" },
     { label: "Net Profit", note: "Gross profit - expense", amount: netProfit, type: "final" }
@@ -103,6 +104,7 @@ function Dashboard() {
         <MetricCard label="Washing / Labour Profit" value={formatMoney(washingProfit)} accent="#0f766e" onClick={() => openBreakdown("washing")} />
         <MetricCard label="Accessories Sale" value={formatMoney(totals.accessories)} accent="#0f2963" onClick={() => openBreakdown("accessoriesSale")} />
         <MetricCard label="Accessories Profit" value={formatMoney(totals.accessoriesProfit)} accent="#15803d" onClick={() => openBreakdown("accessoriesProfit")} />
+        <MetricCard label="Old Accessories Earning" value={formatMoney(totals.oldAccessoriesProfit)} accent="#7c2d12" onClick={() => openBreakdown("oldAccessories")} />
         <MetricCard label="Gross Profit" value={formatMoney(grossProfit)} accent="#166534" onClick={() => openBreakdown("grossProfit")} />
         <MetricCard label="Net Profit" value={formatMoney(netProfit)} accent="#0f5132" onClick={() => openBreakdown("netProfit")} />
         <MetricCard label="This Month Billing" value={formatMoney(invoiceTotal)} accent="#9c742a" onClick={() => openBreakdown("billing")} />
@@ -308,6 +310,7 @@ function getBreakdownConfig(type) {
     washing: { title: "Washing / Labour Breakdown", totalTitle: "Daily Total" },
     accessoriesSale: { title: "Accessories Sale Breakdown", totalTitle: "Daily Sale" },
     accessoriesProfit: { title: "Accessories Profit Breakdown", totalTitle: "Daily Profit" },
+    oldAccessories: { title: "Old Accessories Earning Breakdown", totalTitle: "Daily Old Accessories" },
     grossProfit: { title: "Gross Profit Breakdown", totalTitle: "Daily Gross Profit" },
     netProfit: { title: "Net Profit Breakdown", totalTitle: "Daily Net Profit" },
     billing: { title: "This Month Billing Breakdown", totalTitle: "Daily Billing" },
@@ -322,11 +325,13 @@ function getDashboardBreakdownRows(type, report, products) {
   if (type === "washing") return getWashingBreakdownRows(report);
   if (type === "accessoriesSale") return getAccessoriesRows(report, "sale");
   if (type === "accessoriesProfit") return getAccessoriesRows(report, "profit");
-  if (type === "grossProfit") return [...getWashingBreakdownRows(report), ...getAccessoriesRows(report, "profit")].sort(sortRowsByDateDesc);
+  if (type === "oldAccessories") return getOldAccessoriesRows(report);
+  if (type === "grossProfit") return [...getWashingBreakdownRows(report), ...getAccessoriesRows(report, "profit"), ...getOldAccessoriesRows(report)].sort(sortRowsByDateDesc);
   if (type === "netProfit") {
     return [
       ...getWashingBreakdownRows(report),
       ...getAccessoriesRows(report, "profit"),
+      ...getOldAccessoriesRows(report),
       ...getExpenseRows(report).map((row) => ({ ...row, amount: -Math.abs(row.amount), source: "Expense" }))
     ].sort(sortRowsByDateDesc);
   }
@@ -334,6 +339,31 @@ function getDashboardBreakdownRows(type, report, products) {
   if (type === "stockValue") return getStockRows(products, true);
   if (type === "expense") return getExpenseRows(report);
   return [];
+}
+
+function getOldAccessoriesRows(report) {
+  return (report.invoices || [])
+    .map((invoice) => {
+      const split = getInvoiceCategoryTotals(invoice);
+      const amount = Number(split.oldAccessoriesProfit || 0);
+      if (amount <= 0) return null;
+      const items = (invoice.invoiceItems || invoice.items || [])
+        .filter((item) => getInvoiceCategoryTotals({ invoiceItems: [item] }).oldAccessories > 0)
+        .map((item) => item.description || item.productInvoiceitem?.productName || item.productName)
+        .filter(Boolean)
+        .join(", ");
+      return {
+        id: `old-accessories-${invoice.id}`,
+        invoiceId: invoice.id,
+        date: formatDate(invoice.invoiceDate || invoice.createdDate),
+        source: `Bill ${invoice.invoiceNumber || invoice.id}`,
+        party: invoice.customer?.customerName || "Walk-in",
+        note: items || "Old Accessories",
+        amount
+      };
+    })
+    .filter(Boolean)
+    .sort(sortRowsByDateDesc);
 }
 
 function invoiceNumberSet(report) {

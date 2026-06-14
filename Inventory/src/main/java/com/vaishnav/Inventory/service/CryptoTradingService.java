@@ -16,6 +16,7 @@ import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -162,6 +163,8 @@ public class CryptoTradingService {
         intelligence.put("topWhales", nestedValue(externalFeeds, "whales", "items"));
         intelligence.put("freeWhaleSources", nestedValue(externalFeeds, "whales", "freeSources"));
         intelligence.put("verifiedNews", nestedValue(externalFeeds, "news", "items"));
+        intelligence.put("twitterFeed", nestedValue(externalFeeds, "social", "status"));
+        intelligence.put("twitterItems", nestedValue(externalFeeds, "social", "items"));
         intelligence.put("etfFlows", nestedValue(externalFeeds, "etf", "items"));
         intelligence.put("sourceRadar", nestedValue(externalFeeds, "sources", "items"));
         intelligence.put("sourceRadarStatus", nestedValue(externalFeeds, "sources", "status"));
@@ -401,16 +404,18 @@ public class CryptoTradingService {
         }
 
         Map<String, Object> news = fetchCryptoPanicNews();
+        Map<String, Object> social = fetchTwitterCryptoFeed();
         Map<String, Object> whales = buildWhaleFlowFeed(marketPrices, futuresIntel);
         Map<String, Object> etf = fetchEtfProxyFeed();
         Map<String, Object> sources = buildSourceRadarFeed();
-        int smartMoneyScore = calculateSmartMoneyScore(whales, etf, news, macroStatus);
-        String externalRisk = smartMoneyScore <= 38 || "HIGH".equals(news.get("risk")) ? "HIGH"
-                : smartMoneyScore <= 55 || "MEDIUM".equals(news.get("risk")) ? "MEDIUM"
+        int smartMoneyScore = calculateSmartMoneyScore(whales, etf, news, social, macroStatus);
+        String externalRisk = smartMoneyScore <= 38 || "HIGH".equals(news.get("risk")) || "HIGH".equals(social.get("risk")) ? "HIGH"
+                : smartMoneyScore <= 55 || "MEDIUM".equals(news.get("risk")) || "MEDIUM".equals(social.get("risk")) ? "MEDIUM"
                 : "NORMAL";
 
         Map<String, Object> feeds = new LinkedHashMap<>();
         feeds.put("news", news);
+        feeds.put("social", social);
         feeds.put("whales", whales);
         feeds.put("etf", etf);
         feeds.put("sources", sources);
@@ -431,6 +436,7 @@ public class CryptoTradingService {
                 Map.of("source", "Yahoo Finance free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "S&P500, DXY, US10Y and VIX macro crisis checks."),
                 Map.of("source", "Alternative.me", "status", "CONNECTED_WHEN_AVAILABLE", "message", "Crypto Fear & Greed Index."),
                 Map.of("source", "CoinGecko free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "BTC dominance, total crypto market cap and stablecoin liquidity proxy."),
+                Map.of("source", "X/Twitter trusted accounts", "status", hasEnv("X_BEARER_TOKEN") || hasEnv("TWITTER_BEARER_TOKEN") ? "CONNECTED_WHEN_AVAILABLE" : "X_BEARER_TOKEN_REQUIRED", "message", "Automated watchlist: Lookonchain, Whale Alert, WuBlockchain, WatcherGuru, CoinDesk, The Block, Arkham, Glassnode, CryptoQuant and CoinGlass."),
                 Map.of("source", "Arkham / Lookonchain / Whale Alert / DeBank / DexScreener", "status", "MANUAL_FREE_WATCH", "message", "Whale/entity watchlist sources; provider API keys can automate deeper tracking."),
                 Map.of("source", "Glassnode / CryptoQuant / CoinGlass", "status", hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY") || hasEnv("COINGLASS_API_KEY") ? "KEY_READY" : "OPTIONAL_KEYS", "message", "Exchange reserve, netflow, whale ratio, liquidations and on-chain metrics.")
         );
@@ -519,13 +525,84 @@ public class CryptoTradingService {
         }
     }
 
+    private Map<String, Object> fetchTwitterCryptoFeed() {
+        Map<String, Object> feed = new LinkedHashMap<>();
+        String bearerToken = System.getenv("X_BEARER_TOKEN");
+        if (bearerToken == null || bearerToken.isBlank()) bearerToken = System.getenv("TWITTER_BEARER_TOKEN");
+
+        if (bearerToken == null || bearerToken.isBlank()) {
+            feed.put("status", "X_BEARER_TOKEN_REQUIRED");
+            feed.put("risk", "UNKNOWN");
+            feed.put("items", List.of(
+                    Map.of("source", "X / @lookonchain", "sentiment", "WAITING", "title", "Smart money and whale public posts. Add X_BEARER_TOKEN to automate."),
+                    Map.of("source", "X / @whale_alert", "sentiment", "WAITING", "title", "Large transfer alerts. Add X_BEARER_TOKEN to automate."),
+                    Map.of("source", "X / @WuBlockchain", "sentiment", "WAITING", "title", "Asia exchange/regulation news. Add X_BEARER_TOKEN to automate."),
+                    Map.of("source", "X / @CoinDesk @TheBlock__", "sentiment", "WAITING", "title", "Verified institutional crypto news."),
+                    Map.of("source", "X / @arkham @glassnode @CryptoQuant_com @coinglass_com", "sentiment", "WAITING", "title", "On-chain, reserves, funding and liquidation context.")
+            ));
+            feed.put("rule", "X/Twitter is used as an early-alert risk filter. Trade still needs whale + derivatives + technical alignment.");
+            return feed;
+        }
+
+        String query = "(from:lookonchain OR from:whale_alert OR from:WuBlockchain OR from:WatcherGuru OR from:CoinDesk OR from:TheBlock__ OR from:arkham OR from:glassnode OR from:CryptoQuant_com OR from:coinglass_com) "
+                + "(BTC OR ETH OR SOL OR BNB OR ETF OR whale OR inflow OR outflow OR liquidation OR funding OR Binance OR Coinbase) -is:retweet lang:en";
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(bearerToken);
+            ResponseEntity<Map> response = new RestTemplate().exchange(
+                    "https://api.twitter.com/2/tweets/search/recent?max_results=10&tweet.fields=created_at,author_id,public_metrics,lang&query=" + encodeQuery(query),
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    Map.class
+            );
+
+            Object dataObj = response.getBody() == null ? null : response.getBody().get("data");
+            List<Map<String, Object>> items = new ArrayList<>();
+            int danger = 0;
+            int positive = 0;
+            if (dataObj instanceof List<?> tweets) {
+                for (Object tweetObj : tweets) {
+                    if (!(tweetObj instanceof Map<?, ?> tweet)) continue;
+                    String text = String.valueOf(tweet.containsKey("text") ? tweet.get("text") : "");
+                    String sentiment = classifyNewsTitle(text);
+                    if ("RISK_OFF".equals(sentiment)) danger++;
+                    if ("RISK_ON".equals(sentiment)) positive++;
+                    String id = String.valueOf(tweet.containsKey("id") ? tweet.get("id") : "");
+                    items.add(Map.of(
+                            "source", "X / author " + String.valueOf(tweet.containsKey("author_id") ? tweet.get("author_id") : ""),
+                            "title", text,
+                            "sentiment", sentiment,
+                            "createdAt", String.valueOf(tweet.containsKey("created_at") ? tweet.get("created_at") : ""),
+                            "url", id.isBlank() ? "https://x.com/" : "https://x.com/i/web/status/" + id
+                    ));
+                }
+            }
+
+            feed.put("status", items.isEmpty() ? "CONNECTED_EMPTY_OR_LIMITED" : "CONNECTED");
+            feed.put("risk", danger >= 2 ? "HIGH" : danger > positive ? "MEDIUM" : "NORMAL");
+            feed.put("items", items.isEmpty()
+                    ? List.of(Map.of("source", "X API", "sentiment", "WAITING", "title", "No recent trusted-account posts returned. Check key tier/quota."))
+                    : items);
+            feed.put("rule", "Trusted X accounts are early-alert inputs only; final trade still needs 50-score model agreement.");
+            return feed;
+        } catch (Exception error) {
+            feed.put("status", "X_FETCH_FAILED");
+            feed.put("risk", "UNKNOWN");
+            feed.put("items", List.of(Map.of("source", "X API", "sentiment", "WAITING", "title", "X fetch failed. Check bearer token, tier, quota or API access.")));
+            return feed;
+        }
+    }
+
     private List<Map<String, Object>> fetchGoogleNewsItems(String query, String source) throws Exception {
-        String encoded = query.replace(" ", "%20").replace("(", "%28").replace(")", "%29").replace("|", "%7C");
         String rss = new RestTemplate().getForObject(
-                "https://news.google.com/rss/search?q=" + encoded + "&hl=en-US&gl=US&ceid=US:en",
+                "https://news.google.com/rss/search?q=" + encodeQuery(query) + "&hl=en-US&gl=US&ceid=US:en",
                 String.class
         );
         return parseRssItems(rss, source);
+    }
+
+    private String encodeQuery(String query) {
+        return URLEncoder.encode(query, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     private List<Map<String, Object>> dedupeNews(List<Map<String, Object>> items) {
@@ -674,12 +751,16 @@ public class CryptoTradingService {
     private int calculateSmartMoneyScore(Map<String, Object> whales,
                                          Map<String, Object> etf,
                                          Map<String, Object> news,
+                                         Map<String, Object> social,
                                          Map<String, Object> macroStatus) {
         int score = 62;
         String newsRisk = String.valueOf(news.getOrDefault("risk", "UNKNOWN"));
+        String socialRisk = String.valueOf(social.getOrDefault("risk", "UNKNOWN"));
         String macroRisk = String.valueOf(macroStatus.getOrDefault("macroRisk", "UNKNOWN"));
         if ("HIGH".equals(newsRisk)) score -= 22;
         else if ("MEDIUM".equals(newsRisk)) score -= 10;
+        if ("HIGH".equals(socialRisk)) score -= 14;
+        else if ("MEDIUM".equals(socialRisk)) score -= 7;
         if ("HIGH".equals(macroRisk)) score -= 18;
         else if ("MEDIUM".equals(macroRisk)) score -= 8;
 

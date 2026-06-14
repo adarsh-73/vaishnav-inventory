@@ -57,10 +57,12 @@ export function calculateReport({ invoices = [], dailyBook = [], monthKey = getC
       sum.washing += split.serviceProfit;
       sum.accessories += split.accessories;
       sum.accessoriesProfit += split.accessoriesProfit;
+      sum.oldAccessories += split.oldAccessories;
+      sum.oldAccessoriesProfit += split.oldAccessoriesProfit;
       if (Number(invoice.remainingAmount || 0) > 0) sum.udhar += Number(invoice.remainingAmount || 0);
       return sum;
     },
-    { washing: 0, accessories: 0, accessoriesProfit: 0, expense: 0, udhar: 0 }
+    { washing: 0, accessories: 0, accessoriesProfit: 0, oldAccessories: 0, oldAccessoriesProfit: 0, expense: 0, udhar: 0 }
   );
 
   const totals = monthDailyBook.reduce((sum, entry) => {
@@ -87,7 +89,7 @@ export function calculateReport({ invoices = [], dailyBook = [], monthKey = getC
   }, fromInvoices);
 
   const washingProfit = totals.washing;
-  const grossProfit = washingProfit + totals.accessoriesProfit;
+  const grossProfit = washingProfit + totals.accessoriesProfit + totals.oldAccessoriesProfit;
   const netProfit = grossProfit - totals.expense;
   const invoiceTotal = monthInvoices.reduce((sum, invoice) => sum + Number(invoice.totalAmount || 0), 0);
 
