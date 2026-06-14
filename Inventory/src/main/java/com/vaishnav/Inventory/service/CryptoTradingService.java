@@ -11,7 +11,7 @@ import java.util.*;
 @Service
 public class CryptoTradingService {
 
-    private static final List<String> SYMBOLS = List.of("BTCUSDT", "ETHUSDT", "SOLUSDT");
+    private static final List<String> SYMBOLS = List.of("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT");
     private static final int MAX_DAILY_PAPER_TRADES = 5;
 
     @Autowired
@@ -153,6 +153,7 @@ public class CryptoTradingService {
                     indicatorService.analyze(marketDataService.getCandles(symbol, "1h", 200));
             Map<String, Object> a4h =
                     indicatorService.analyze(marketDataService.getCandles(symbol, "4h", 200));
+            CryptoMarketDataService.FuturesStats futures = marketDataService.getFuturesStats(symbol);
 
             int longCount = 0;
             int shortCount = 0;
@@ -167,7 +168,7 @@ public class CryptoTradingService {
                     (toDouble(a15.get("score")) + toDouble(a1h.get("score")) + toDouble(a4h.get("score"))) / 3.0
             );
 
-            double atr = getAtr(symbol);
+            double atr = Math.max(toDouble(a15.get("atr14")), getAtr(symbol) * 0.25);
             double stopDistance = atr * 0.82;
             double riskReward = 2.0;
 
@@ -184,7 +185,9 @@ public class CryptoTradingService {
                     : livePrice - atr * 0.55;
 
             boolean aligned = longCount == 3 || shortCount == 3;
-            boolean allowed = aligned && avgScore >= 65;
+            boolean fundingRisk = Math.abs(futures.fundingRate) >= 0.001;
+            boolean futuresAvailable = futures.openInterest > 0 || futures.markPrice > 0;
+            boolean allowed = aligned && avgScore >= 65 && futuresAvailable && !fundingRisk;
 
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("symbol", symbol);
@@ -202,6 +205,15 @@ public class CryptoTradingService {
             map.put("trailingStop", trailingStop);
             map.put("riskReward", riskReward);
             map.put("positionSize", 1000 / livePrice);
+            map.put("futuresData", Map.of(
+                    "openInterest", futures.openInterest,
+                    "fundingRate", futures.fundingRate,
+                    "markPrice", futures.markPrice,
+                    "indexPrice", futures.indexPrice,
+                    "priceChangePercent24h", futures.priceChangePercent24h,
+                    "quoteVolume24h", futures.quoteVolume24h,
+                    "source", "BINANCE_FUTURES_REAL"
+            ));
 
             map.put("timeframes", List.of(
                     timeframeRow("15m", a15),
@@ -217,7 +229,7 @@ public class CryptoTradingService {
             map.put("aiConsensus", "LONG=" + longCount + "/3 SHORT=" + shortCount + "/3");
             map.put("bestAi", "Indicator Engine");
             map.put("indicatorSummary", Map.of(
-                    "total", 18,
+                    "total", 36,
                     "bullish", Math.round(
                             toDouble(a15.get("bullish")) + toDouble(a1h.get("bullish")) + toDouble(a4h.get("bullish"))
                     ),
@@ -225,9 +237,9 @@ public class CryptoTradingService {
                             toDouble(a15.get("bearish")) + toDouble(a1h.get("bearish")) + toDouble(a4h.get("bearish"))
                     )
             ));
-            map.put("technicalSummary", "Real Binance candles checked: SMA20, SMA50, SMA200, RSI14 on 15m/1h/4h");
-            map.put("newsRisk", "NORMAL");
-            map.put("blockReason", allowed ? "" : "Timeframes not aligned or score below 65");
+            map.put("technicalSummary", "Real Binance candles checked: SMA20/50/200, EMA20/50/200, RSI14, MACD, Bollinger Bands, ATR14, VWAP on 15m/1h/4h. Futures checked: open interest, funding, mark price, 24h futures volume.");
+            map.put("newsRisk", fundingRisk ? "FUNDING_RISK" : "NORMAL");
+            map.put("blockReason", allowed ? "" : !futuresAvailable ? "Binance futures data unavailable" : fundingRisk ? "Funding rate too risky" : "Timeframes not aligned or score below 65");
 
             return map;
 
@@ -265,9 +277,17 @@ public class CryptoTradingService {
         row.put("signal", analysis.get("signal"));
         row.put("score", analysis.get("score"));
         row.put("ma50", analysis.get("sma50"));
-        row.put("ma100", analysis.get("sma20"));
+        row.put("ma100", analysis.get("ema50"));
         row.put("ma200", analysis.get("sma200"));
         row.put("rsi", analysis.get("rsi14"));
+        row.put("ema20", analysis.get("ema20"));
+        row.put("ema50", analysis.get("ema50"));
+        row.put("ema200", analysis.get("ema200"));
+        row.put("macd", analysis.get("macd"));
+        row.put("macdSignal", analysis.get("macdSignal"));
+        row.put("bollingerPosition", analysis.get("bollingerPosition"));
+        row.put("atr14", analysis.get("atr14"));
+        row.put("vwap", analysis.get("vwap"));
         return row;
     }
 
@@ -276,6 +296,7 @@ public class CryptoTradingService {
             case "BTCUSDT" -> 1850.0;
             case "ETHUSDT" -> 112.0;
             case "SOLUSDT" -> 7.8;
+            case "BNBUSDT" -> 18.0;
             default -> 10.0;
         };
     }

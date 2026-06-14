@@ -47,6 +47,37 @@ public class CryptoMarketDataService {
         return Double.parseDouble(String.valueOf(response.get("price")));
     }
 
+    public FuturesStats getFuturesStats(String symbol) {
+        FuturesStats stats = new FuturesStats();
+        stats.symbol = symbol;
+
+        Map openInterest = restTemplate.getForObject(
+                "https://fapi.binance.com/fapi/v1/openInterest?symbol=" + symbol,
+                Map.class
+        );
+        Map premium = restTemplate.getForObject(
+                "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" + symbol,
+                Map.class
+        );
+        Map ticker = restTemplate.getForObject(
+                "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=" + symbol,
+                Map.class
+        );
+
+        stats.openInterest = parseDouble(openInterest == null ? null : openInterest.get("openInterest"));
+        stats.fundingRate = parseDouble(premium == null ? null : premium.get("lastFundingRate"));
+        stats.markPrice = parseDouble(premium == null ? null : premium.get("markPrice"));
+        stats.indexPrice = parseDouble(premium == null ? null : premium.get("indexPrice"));
+        stats.priceChangePercent24h = parseDouble(ticker == null ? null : ticker.get("priceChangePercent"));
+        stats.quoteVolume24h = parseDouble(ticker == null ? null : ticker.get("quoteVolume"));
+        return stats;
+    }
+
+    private double parseDouble(Object value) {
+        if (value == null) return 0;
+        return Double.parseDouble(String.valueOf(value));
+    }
+
     public static class Candle {
         public long openTime;
         public double open;
@@ -54,5 +85,15 @@ public class CryptoMarketDataService {
         public double low;
         public double close;
         public double volume;
+    }
+
+    public static class FuturesStats {
+        public String symbol;
+        public double openInterest;
+        public double fundingRate;
+        public double markPrice;
+        public double indexPrice;
+        public double priceChangePercent24h;
+        public double quoteVolume24h;
     }
 }
