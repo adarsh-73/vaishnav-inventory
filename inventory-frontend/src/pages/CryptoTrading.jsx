@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest } from "../utils/api";
 
 const MARKETS = {
@@ -37,6 +37,10 @@ function CryptoTrading() {
   const [apiSecret, setApiSecret] = useState("");
   const [serverDashboard, setServerDashboard] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [notificationEnabled, setNotificationEnabled] = useState(
+    typeof Notification !== "undefined" && Notification.permission === "granted"
+  );
+  const lastNotificationKey = useRef("");
 
   const localDashboard = useMemo(
     () => buildDashboard({ capital, riskPercent, maxLeverage, confidenceGate, dailyLossLimit }),
@@ -49,6 +53,7 @@ function CryptoTrading() {
   const selectedPlan = dashboard.plans[selectedSymbol];
   const portfolio = dashboard.portfolio;
   const binanceStatus = dashboard.binance || {};
+  const liveAlerts = buildLiveAlerts(dashboard);
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -66,6 +71,26 @@ function CryptoTrading() {
     const timer = setInterval(loadDashboard, 30000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!notificationEnabled || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const majorAlert = liveAlerts.find((alert) => alert.type === "Whale" || alert.type === "Risk");
+    if (!majorAlert) return;
+    const key = `${majorAlert.type}-${majorAlert.title}-${majorAlert.detail}`;
+    if (lastNotificationKey.current === key) return;
+    lastNotificationKey.current = key;
+    new Notification(`Crypto ${majorAlert.type} Alert`, {
+      body: `${majorAlert.title}. ${majorAlert.detail}`,
+      tag: key
+    });
+  }, [liveAlerts, notificationEnabled]);
+
+  const enableNotifications = async () => {
+    if (typeof Notification === "undefined") return alert("Is browser me notification support nahi hai.");
+    const permission = await Notification.requestPermission();
+    setNotificationEnabled(permission === "granted");
+    if (permission !== "granted") alert("Notification allow nahi hua. Browser permission me allow karna hoga.");
+  };
 
   const runPaperScan = async () => {
     if (!paperEnabled) return alert("Paper Trade OFF hai.");
@@ -156,6 +181,27 @@ function CryptoTrading() {
 
       <section style={noticeStyle}>
         <strong>{cashEnabled ? "Cash Enabled:" : "Cash Disabled:"}</strong> {cashEnabled ? "Binance connect/testnet panel active hai, lekin live real-money order backend vault aur final approval ke bina locked rahega." : "AI paper trades hi record honge. Is mode me tum dekh sakte ho AI ne din me kitne trade liye aur profit/loss kya raha."}
+      </section>
+
+      <section style={alertStrip}>
+        <div style={alertHeader}>
+          <strong>Live Market Alerts</strong>
+          <div style={alertActions}>
+            <span>{liveAlerts.length} active</span>
+            <button type="button" onClick={enableNotifications} style={notificationBtn}>
+              {notificationEnabled ? "Notifications ON" : "Enable Notifications"}
+            </button>
+          </div>
+        </div>
+        <div style={alertGrid}>
+          {liveAlerts.map((alert) => (
+            <div key={alert.id} style={{ ...alertCard, borderLeftColor: alert.color }}>
+              <span style={{ ...alertType, color: alert.color }}>{alert.type}</span>
+              <strong>{alert.title}</strong>
+              <small>{alert.detail}</small>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section style={intelligenceGrid}>
@@ -327,10 +373,16 @@ function CryptoTrading() {
 
         <section style={panelStyle}>
           <div style={panelHeader}>
-            <h2 style={panelTitle}>Binance Connect Plan</h2>
-            <span style={cashEnabled && binanceStatus.connected ? safePill : warnPill}>{cashEnabled && binanceStatus.connected ? "Vault connected" : "Cash disabled / not connected"}</span>
+            <h2 style={panelTitle}>Binance Vault</h2>
+            <span style={cashEnabled && binanceStatus.connected ? safePill : warnPill}>{cashEnabled && binanceStatus.connected ? "Testnet connected" : "Paper safe mode"}</span>
           </div>
           <div style={connectBox}>
+            <div style={vaultStatusGrid}>
+              <Info label="Cash Mode" value={cashEnabled ? "ON" : "OFF"} good={cashEnabled} />
+              <Info label="Vault" value={binanceStatus.connected ? "Connected" : "Not Connected"} good={binanceStatus.connected} />
+              <Info label="Live Money" value="LOCKED" danger />
+              <Info label="Auto Trade" value={cashEnabled && autoTrade ? "TESTNET ARMED" : "OFF"} good={cashEnabled && autoTrade} />
+            </div>
             {cashEnabled ? (
               <>
                 <label style={fieldLabel}>API Key
@@ -348,7 +400,10 @@ function CryptoTrading() {
                 </div>
               </>
             ) : (
-              <div style={connectNote}>Cash Disabled hai. Binance connect option cash enable karne par dikhega. Abhi AI paper trade monitoring safe mode me chalega.</div>
+              <div style={connectNote}>
+                Cash Disabled hai. Abhi safe paper monitoring chalega.
+                <button type="button" onClick={() => setCashEnabled(true)} style={{ ...secondaryBtn, marginLeft: "10px" }}>Enable Binance Connect</button>
+              </div>
             )}
             <div style={connectNote}>Daily cap: max {portfolio.maxDailyTrades} paper trades/day. Real cash mode me bhi same cap, kill switch, SL/TP aur manual final unlock required hoga.</div>
           </div>
@@ -448,6 +503,32 @@ function FeedList({ title, status, items }) {
       </div>
     </div>
   );
+}
+
+function buildLiveAlerts(dashboard) {
+  const alerts = [];
+  const intelligence = dashboard.intelligence || {};
+  if (intelligence.externalRisk === "HIGH" || intelligence.newsRisk === "HIGH") {
+    alerts.push({ id: "risk", type: "Risk", title: "High news/smart-money risk", detail: "AI no-trade chance badhayega.", color: "#b91c1c" });
+  }
+  (intelligence.topWhales || []).slice(0, 3).forEach((item, index) => {
+    if (item.severity === "HIGH" || Number(item.largeTrades || 0) >= 5) {
+      alerts.push({
+        id: `whale-${index}`,
+        type: "Whale",
+        title: `${item.asset || "Coin"} large flow`,
+        detail: `${item.flow || "Large trades detected"} | ${item.direction || "BALANCED"}`,
+        color: "#7c3aed"
+      });
+    }
+  });
+  if ((dashboard.liveTrades || []).length > 0) {
+    alerts.push({ id: "running", type: "Trade", title: `${dashboard.liveTrades.length} running paper trade`, detail: "Live PnL table me update ho raha hai.", color: "#0f766e" });
+  }
+  if (alerts.length === 0) {
+    alerts.push({ id: "calm", type: "Status", title: "No major alert", detail: "System normal monitoring mode me hai.", color: "#0f2963" });
+  }
+  return alerts;
 }
 
 function buildDashboard(settings) {
@@ -762,6 +843,13 @@ const activeToggle = { ...toggleBtn, background: "#e0f2fe", color: "#075985", bo
 const goodToggle = { ...toggleBtn, background: "#dcfce7", color: "#166534", borderColor: "#86efac" };
 const dangerToggle = { ...toggleBtn, background: "#fee2e2", color: "#991b1b", borderColor: "#fca5a5" };
 const noticeStyle = { background: "#fffbeb", border: "1px solid #fcd34d", color: "#92400e", padding: "12px 14px", borderRadius: "8px", marginBottom: "18px", fontSize: "13px" };
+const alertStrip = { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", marginBottom: "18px", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", overflow: "hidden" };
+const alertHeader = { padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", color: "#0f2963" };
+const alertActions = { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" };
+const alertGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "10px", padding: "12px" };
+const alertCard = { border: "1px solid #e2e8f0", borderLeft: "4px solid #0f2963", borderRadius: "8px", padding: "11px", display: "grid", gap: "4px", background: "#f8fafc" };
+const alertType = { fontSize: "11px", fontWeight: "900", textTransform: "uppercase" };
+const notificationBtn = { border: "1px solid #0f2963", background: "#ffffff", color: "#0f2963", borderRadius: "6px", padding: "6px 9px", fontWeight: "900", cursor: "pointer" };
 const intelligenceGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "12px", marginBottom: "18px" };
 const strategyPanel = { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", marginBottom: "18px", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", overflow: "hidden" };
 const panelHeaderCompact = { padding: "13px 16px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" };
@@ -819,6 +907,7 @@ const ruleList = { padding: "0 16px 16px", display: "grid", gap: "9px" };
 const ruleOk = { border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#166534", borderRadius: "8px", padding: "10px", display: "flex", gap: "10px" };
 const ruleBad = { border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: "8px", padding: "10px", display: "flex", gap: "10px" };
 const connectBox = { padding: "16px", display: "grid", gap: "12px" };
+const vaultStatusGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: "10px" };
 const buttonRow = { display: "flex", gap: "10px", flexWrap: "wrap" };
 const primaryBtn = { padding: "11px 14px", background: "#0f2963", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "900", cursor: "pointer" };
 const secondaryBtn = { padding: "11px 14px", background: "#ffffff", color: "#0f2963", border: "1px solid #0f2963", borderRadius: "6px", fontWeight: "900", cursor: "pointer" };

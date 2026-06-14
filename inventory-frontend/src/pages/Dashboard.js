@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiRequest, formatInvoiceCategory, getInvoiceProfit } from "../utils/api";
+import { apiRequest, formatInvoiceCategory, getInvoiceCategoryTotals, getInvoiceProfit, isWashingEntry } from "../utils/api";
 import { calculateReport, getCurrentMonthKey } from "../utils/reporting";
 
 function Dashboard() {
@@ -8,6 +8,7 @@ function Dashboard() {
   const [products, setProducts] = useState([]);
   const [dailyBook, setDailyBook] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [showWashingBreakdown, setShowWashingBreakdown] = useState(false);
 
   const load = async () => {
     try {
@@ -62,6 +63,8 @@ function Dashboard() {
   const goToUdhar = () => navigate("/old-bills?udhar=1");
   const recentInvoices = report.invoices.slice().reverse().slice(0, 6);
   const recentEntries = report.dailyBook.slice().reverse().slice(0, 6);
+  const washingRows = useMemo(() => getWashingBreakdownRows(report), [report]);
+  const washingDailyTotals = useMemo(() => getDailyTotals(washingRows), [washingRows]);
 
   return (
     <div style={pageStyle}>
@@ -95,7 +98,7 @@ function Dashboard() {
       )}
 
       <div style={cardGrid}>
-        <MetricCard label="Washing / Labour Profit" value={formatMoney(washingProfit)} accent="#0f766e" />
+        <MetricCard label="Washing / Labour Profit" value={formatMoney(washingProfit)} accent="#0f766e" onClick={() => setShowWashingBreakdown((value) => !value)} />
         <MetricCard label="Accessories Sale" value={formatMoney(totals.accessories)} accent="#0f2963" />
         <MetricCard label="Accessories Profit" value={formatMoney(totals.accessoriesProfit)} accent="#15803d" />
         <MetricCard label="Gross Profit" value={formatMoney(grossProfit)} accent="#166534" />
@@ -107,6 +110,71 @@ function Dashboard() {
         <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={goToUdhar} />
         <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" />
       </div>
+
+      {showWashingBreakdown && (
+        <section style={widePanelStyle}>
+          <div style={panelHeader}>
+            <h2 style={panelTitle}>Washing / Labour Daily Breakdown</h2>
+            <button type="button" onClick={() => setShowWashingBreakdown(false)} style={refreshBtn}>Close</button>
+          </div>
+          <div style={breakdownGrid}>
+            <div style={miniPanel}>
+              <h3 style={miniTitle}>Daily Total</h3>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Date</th>
+                    <th style={thStyle}>Entries</th>
+                    <th style={thStyle}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {washingDailyTotals.map((row) => (
+                    <tr key={row.date}>
+                      <td style={tdStyle}>{row.date}</td>
+                      <td style={tdStyle}>{row.count}</td>
+                      <td style={amountTd}>{formatMoney(row.amount)}</td>
+                    </tr>
+                  ))}
+                  {washingDailyTotals.length === 0 && <tr><td style={emptyTd} colSpan="3">No washing/labour entries</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div style={miniPanel}>
+              <h3 style={miniTitle}>Entry Wise Detail</h3>
+              <div style={tableWrap}>
+                <table style={detailTableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Date</th>
+                      <th style={thStyle}>Source</th>
+                      <th style={thStyle}>Customer / Party</th>
+                      <th style={thStyle}>Note</th>
+                      <th style={thStyle}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {washingRows.map((row) => (
+                      <tr
+                        key={row.id}
+                        onClick={() => row.invoiceId ? navigate(`/billing?invoiceId=${row.invoiceId}`) : navigate("/daily-book")}
+                        style={clickableRow}
+                      >
+                        <td style={tdStyle}>{row.date}</td>
+                        <td style={tdStyle}>{row.source}</td>
+                        <td style={tdStyle}>{row.party}</td>
+                        <td style={tdStyle}>{row.note}</td>
+                        <td style={amountTd}>{formatMoney(row.amount)}</td>
+                      </tr>
+                    ))}
+                    {washingRows.length === 0 && <tr><td style={emptyTd} colSpan="5">No washing/labour entries</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div style={panelGrid}>
         <section style={panelStyle}>
@@ -229,6 +297,67 @@ function formatMoney(value) {
   return `Rs. ${Number(value || 0).toLocaleString("en-IN")}`;
 }
 
+function formatDate(value) {
+  return String(value || "").slice(0, 10) || "-";
+}
+
+function getWashingBreakdownRows(report) {
+  const invoiceNumberSet = new Set(
+    (report.invoices || [])
+      .map((invoice) => invoice.invoiceNumber)
+      .filter(Boolean)
+      .map((invoiceNumber) => String(invoiceNumber).trim().toLowerCase())
+  );
+  const invoiceRows = (report.invoices || [])
+    .map((invoice) => {
+      const split = getInvoiceCategoryTotals(invoice);
+      if (Number(split.serviceProfit || 0) <= 0) return null;
+      const items = (invoice.invoiceItems || invoice.items || [])
+        .map((item) => item.description || item.productInvoiceitem?.productName || item.productName)
+        .filter(Boolean)
+        .join(", ");
+      return {
+        id: `invoice-${invoice.id}`,
+        invoiceId: invoice.id,
+        date: formatDate(invoice.invoiceDate || invoice.createdDate),
+        source: `Bill ${invoice.invoiceNumber || invoice.id}`,
+        party: invoice.customer?.customerName || "Walk-in",
+        note: items || formatInvoiceCategory(invoice),
+        amount: Number(split.serviceProfit || 0)
+      };
+    })
+    .filter(Boolean);
+
+  const dailyRows = (report.dailyBook || [])
+    .filter((entry) => {
+      const note = String(entry.note || "").toLowerCase();
+      const isInvoiceEntry = note.includes("invoice ");
+      const isInvoiceMirror = isInvoiceEntry && Array.from(invoiceNumberSet).some((invoiceNumber) => note.includes(invoiceNumber));
+      return entry.entryType === "income" && entry.paymentStatus !== "udhar" && !isInvoiceMirror && !isInvoiceEntry && isWashingEntry(entry);
+    })
+    .map((entry) => ({
+      id: `daily-${entry.id}`,
+      date: formatDate(entry.entryDate || entry.createdDate),
+      source: "Daily Book",
+      party: entry.partyName || "-",
+      note: entry.note || entry.incomeCategory || "Washing / Labour",
+      amount: Number(entry.amount || 0)
+    }));
+
+  return [...invoiceRows, ...dailyRows].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function getDailyTotals(rows) {
+  const byDate = new Map();
+  rows.forEach((row) => {
+    const current = byDate.get(row.date) || { date: row.date, count: 0, amount: 0 };
+    current.count += 1;
+    current.amount += Number(row.amount || 0);
+    byDate.set(row.date, current);
+  });
+  return Array.from(byDate.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
 const pageStyle = { padding: "28px", background: "#eef2f6", minHeight: "100vh", color: "#0f172a" };
 const heroStyle = { background: "linear-gradient(135deg, #071635 0%, #0f2963 58%, #12233f 100%)", color: "#ffffff", borderRadius: "8px", padding: "24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "18px", boxShadow: "0 14px 34px rgba(15, 41, 99, 0.22)", marginBottom: "22px" };
 const brandBlock = { display: "flex", alignItems: "center", gap: "18px" };
@@ -250,10 +379,13 @@ const cardLabel = { color: "#64748b", fontSize: "13px", fontWeight: "800", textT
 const cardValue = { fontSize: "26px", fontWeight: "900", marginTop: "12px" };
 const panelGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "18px" };
 const panelStyle = { background: "#ffffff", borderRadius: "8px", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", overflow: "hidden", border: "1px solid #e2e8f0" };
+const widePanelStyle = { ...panelStyle, marginBottom: "18px" };
 const panelHeader = { padding: "15px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" };
 const panelTitle = { margin: 0, fontSize: "17px", color: "#0f2963" };
 const refreshBtn = { border: "1px solid #0f2963", background: "#ffffff", color: "#0f2963", borderRadius: "5px", padding: "7px 11px", fontWeight: "800", cursor: "pointer" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
+const tableWrap = { overflowX: "auto" };
+const detailTableStyle = { ...tableStyle, minWidth: "760px" };
 const thStyle = { textAlign: "left", padding: "11px 14px", background: "#f8fafc", color: "#475569", fontSize: "12px", textTransform: "uppercase", borderBottom: "1px solid #e2e8f0" };
 const tdStyle = { padding: "12px 14px", borderBottom: "1px solid #edf2f7", color: "#334155", fontSize: "13px" };
 const amountTd = { ...tdStyle, color: "#0f2963", fontWeight: "900", whiteSpace: "nowrap" };
@@ -262,6 +394,10 @@ const emptyTd = { ...tdStyle, textAlign: "center", color: "#94a3b8" };
 const alertBox = { background: "#fff7ed", border: "1px solid #fb923c", color: "#9a3412", padding: "14px", borderRadius: "8px", marginBottom: "18px" };
 const alertList = { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" };
 const alertPill = { background: "#ffedd5", border: "1px solid #fdba74", padding: "6px 9px", borderRadius: "999px", fontSize: "13px", fontWeight: "bold", color: "#9a3412", cursor: "pointer" };
+const breakdownGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px", padding: "16px" };
+const miniPanel = { border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", background: "#ffffff" };
+const miniTitle = { margin: 0, padding: "12px 14px", borderBottom: "1px solid #e2e8f0", color: "#0f2963", fontSize: "15px" };
+const clickableRow = { cursor: "pointer" };
 
 function profitAmountStyle(type) {
   const color = type === "minus" ? "#b91c1c" : type === "final" ? "#0f5132" : "#0f2963";
