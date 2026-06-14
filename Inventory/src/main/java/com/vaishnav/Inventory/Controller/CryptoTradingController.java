@@ -25,6 +25,11 @@ public class CryptoTradingController {
         return cryptoTradingService.getDashboard();
     }
 
+    @GetMapping("/fear-greed")
+    public Map<String, Object> fearGreed() {
+        return cryptoTradingService.getFearGreedDirect();
+    }
+
     @PostMapping("/paper-scan")
     public List<CryptoPaperTrade> paperScan() {
         return cryptoTradingService.runPaperScan();

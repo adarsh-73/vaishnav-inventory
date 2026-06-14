@@ -89,6 +89,24 @@ public class CryptoTradingService {
         return response;
     }
 
+    public Map<String, Object> getFearGreedDirect() {
+        try {
+            Map<String, Object> fearGreed = fetchFearGreed();
+            fearGreed.put("apiUrl", "https://api.alternative.me/fng/");
+            fearGreed.put("usedInTrading", true);
+            fearGreed.put("rule", "Extreme fear reduces long confidence; neutral/greed is used with whale, derivatives and technical confirmation.");
+            return fearGreed;
+        } catch (Exception error) {
+            return Map.of(
+                    "status", "FETCH_FAILED",
+                    "source", "ALTERNATIVE_ME",
+                    "apiUrl", "https://api.alternative.me/fng/",
+                    "usedInTrading", true,
+                    "message", "Fear & Greed direct API call failed. Dashboard will keep other risk filters active."
+            );
+        }
+    }
+
     private List<Map<String, Object>> buildLiveTrades(Map<String, Map<String, Object>> marketPrices) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (CryptoPaperTrade trade : paperTradeRepository.findByStatus("RUNNING")) {
@@ -190,6 +208,8 @@ public class CryptoTradingService {
         macro.put("vix", "FREE_YAHOO_WAITING");
         macro.put("fearGreed", "FREE_ALTERNATIVE_ME_WAITING");
         macro.put("cryptoGlobal", "FREE_COINGECKO_WAITING");
+        macro.put("defiLlamaStablecoins", "FREE_DEFILLAMA_WAITING");
+        macro.put("defiLlamaChains", "FREE_DEFILLAMA_WAITING");
         macro.put("macroRisk", "UNKNOWN");
         macro.put("rule", "Rohit-style macro guard: S&P500, DXY, US yields, VIX, Fear & Greed, BTC dominance, total crypto market cap and stablecoin liquidity filter every trade.");
         macro.put("sources", List.of(
@@ -197,6 +217,7 @@ public class CryptoTradingService {
                 "Alternative.me: Crypto Fear & Greed",
                 "CoinGecko global: BTC dominance and total crypto market cap",
                 "CoinGecko markets: stablecoin market cap proxy",
+                "DeFiLlama free: stablecoin supply, USDT/USDC liquidity and chain TVL",
                 "AlphaVantage optional: SPY/UUP fallback"
         ));
 
@@ -242,6 +263,26 @@ public class CryptoTradingService {
             macro.put("stablecoinMarketCap", Map.of("status", "FETCH_FAILED"));
         }
 
+        try {
+            Map<String, Object> defiStablecoins = fetchDefiLlamaStablecoins();
+            macro.put("defiLlamaStablecoins", defiStablecoins);
+            macro.put("defiLlamaStablecoinTotalUsd", asDouble(defiStablecoins.get("totalUsd")));
+            macro.put("defiLlamaStablecoinChange1d", asDouble(defiStablecoins.get("change1d")));
+            macro.put("defiLlamaUsdtMarketCap", asDouble(defiStablecoins.get("usdtMarketCap")));
+            macro.put("defiLlamaUsdcMarketCap", asDouble(defiStablecoins.get("usdcMarketCap")));
+        } catch (Exception error) {
+            macro.put("defiLlamaStablecoins", Map.of("status", "FETCH_FAILED", "source", "DEFILLAMA_FREE"));
+        }
+
+        try {
+            Map<String, Object> defiChains = fetchDefiLlamaChains();
+            macro.put("defiLlamaChains", defiChains);
+            macro.put("defiLlamaTvlUsd", asDouble(defiChains.get("totalTvlUsd")));
+            macro.put("defiLlamaTvlChange1d", asDouble(defiChains.get("weightedChange1d")));
+        } catch (Exception error) {
+            macro.put("defiLlamaChains", Map.of("status", "FETCH_FAILED", "source", "DEFILLAMA_FREE"));
+        }
+
         String alphaKey = System.getenv("ALPHAVANTAGE_API_KEY");
         if (alphaKey != null && !alphaKey.isBlank()) {
             RestTemplate restTemplate = new RestTemplate();
@@ -270,15 +311,17 @@ public class CryptoTradingService {
         double vixChange = asDouble(macro.get("vixChangePercent"));
         double fearGreedValue = asDouble(macro.get("fearGreedValue"));
         double cryptoMcapChange = asDouble(macro.get("totalCryptoMarketCapChange24h"));
+        double defiStablecoinChange = asDouble(macro.get("defiLlamaStablecoinChange1d"));
+        double defiTvlChange = asDouble(macro.get("defiLlamaTvlChange1d"));
 
-        String risk = sp500Change <= -1.0 || dxyChange >= 0.75 || yieldChange >= 1.0 || vixChange >= 8 || (fearGreedValue > 0 && fearGreedValue <= 25)
+        String risk = sp500Change <= -1.0 || dxyChange >= 0.75 || yieldChange >= 1.0 || vixChange >= 8 || defiStablecoinChange <= -0.7 || defiTvlChange <= -2.5 || (fearGreedValue > 0 && fearGreedValue <= 25)
                 ? "HIGH"
-                : sp500Change <= -0.35 || dxyChange >= 0.35 || yieldChange >= 0.45 || vixChange >= 3.5 || cryptoMcapChange <= -2.5 || (fearGreedValue > 0 && fearGreedValue <= 40)
+                : sp500Change <= -0.35 || dxyChange >= 0.35 || yieldChange >= 0.45 || vixChange >= 3.5 || cryptoMcapChange <= -2.5 || defiStablecoinChange <= -0.25 || defiTvlChange <= -1.0 || (fearGreedValue > 0 && fearGreedValue <= 40)
                 ? "MEDIUM"
                 : "NORMAL";
         macro.put("macroRisk", risk);
-        macro.put("macroBias", dxyChange > 0.35 || sp500Change < -0.35 || vixChange > 3.5 ? "RISK_OFF" : cryptoMcapChange > 1.5 && sp500Change >= 0 ? "RISK_ON" : "NEUTRAL");
-        macro.put("rule", "Longs need stronger confirmation when S&P is red, DXY/yields/VIX are rising, Fear & Greed is extreme fear, or total crypto market cap is falling.");
+        macro.put("macroBias", dxyChange > 0.35 || sp500Change < -0.35 || vixChange > 3.5 || defiStablecoinChange < -0.25 ? "RISK_OFF" : (cryptoMcapChange > 1.5 || defiStablecoinChange > 0.25 || defiTvlChange > 1.0) && sp500Change >= 0 ? "RISK_ON" : "NEUTRAL");
+        macro.put("rule", "Longs need stronger confirmation when S&P is red, DXY/yields/VIX are rising, Fear & Greed is extreme fear, crypto market cap falls, or DeFiLlama stablecoin/TVL liquidity is leaving.");
         cachedMacroStatus = macro;
         cachedMacroStatusAt = Instant.now();
         return macro;
@@ -379,6 +422,99 @@ public class CryptoTradingService {
         );
     }
 
+    private Map<String, Object> fetchDefiLlamaStablecoins() {
+        Map<?, ?> response = new RestTemplate().getForObject(
+                "https://stablecoins.llama.fi/stablecoins?includePrices=true",
+                Map.class
+        );
+        Object assetsObj = response == null ? null : response.get("peggedAssets");
+        List<Map<String, Object>> items = new ArrayList<>();
+        double totalUsd = 0;
+        double weightedChange = 0;
+        double usdtMarketCap = 0;
+        double usdcMarketCap = 0;
+        if (assetsObj instanceof List<?> assets) {
+            for (Object assetObj : assets) {
+                if (!(assetObj instanceof Map<?, ?> asset)) continue;
+                String symbol = String.valueOf(asset.containsKey("symbol") ? asset.get("symbol") : "");
+                double marketCap = peggedUsdValue(asset.get("circulating"));
+                double change1d = numberValue(asset.get("change_1d"));
+                if (marketCap <= 0) continue;
+                totalUsd += marketCap;
+                weightedChange += change1d * marketCap;
+                if ("USDT".equalsIgnoreCase(symbol)) usdtMarketCap = marketCap;
+                if ("USDC".equalsIgnoreCase(symbol)) usdcMarketCap = marketCap;
+                if (items.size() < 8) {
+                    items.add(Map.of(
+                            "symbol", symbol,
+                            "name", String.valueOf(asset.containsKey("name") ? asset.get("name") : symbol),
+                            "marketCap", round(marketCap),
+                            "change1d", round(change1d),
+                            "chains", asset.get("chains") == null ? List.of() : asset.get("chains")
+                    ));
+                }
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", totalUsd > 0 ? "CONNECTED" : "FETCH_FAILED");
+        result.put("source", "DEFILLAMA_STABLECOINS_FREE");
+        result.put("totalUsd", round(totalUsd));
+        result.put("change1d", totalUsd > 0 ? round(weightedChange / totalUsd) : 0);
+        result.put("usdtMarketCap", round(usdtMarketCap));
+        result.put("usdcMarketCap", round(usdcMarketCap));
+        result.put("items", items);
+        result.put("rule", "Stablecoin supply rising = liquidity support; supply falling = risk-off/no-trade pressure.");
+        return result;
+    }
+
+    private Map<String, Object> fetchDefiLlamaChains() {
+        Object response = new RestTemplate().getForObject("https://api.llama.fi/v2/chains", Object.class);
+        Set<String> watchedChains = Set.of("Ethereum", "Solana", "BSC", "Arbitrum", "Base", "Polygon", "Optimism", "Avalanche");
+        List<Map<String, Object>> items = new ArrayList<>();
+        double totalTvl = 0;
+        double watchedTvl = 0;
+        double weightedChange = 0;
+        if (response instanceof List<?> chains) {
+            for (Object chainObj : chains) {
+                if (!(chainObj instanceof Map<?, ?> chain)) continue;
+                String name = String.valueOf(chain.containsKey("name") ? chain.get("name") : "");
+                double tvl = numberValue(chain.get("tvl"));
+                double change1d = numberValue(chain.get("change_1d"));
+                totalTvl += Math.max(0, tvl);
+                if (watchedChains.contains(name)) {
+                    watchedTvl += Math.max(0, tvl);
+                    weightedChange += change1d * Math.max(0, tvl);
+                    items.add(Map.of(
+                            "chain", name,
+                            "tvl", round(tvl),
+                            "change1d", round(change1d),
+                            "signal", change1d >= 1 ? "RISK_ON" : change1d <= -1 ? "RISK_OFF" : "NEUTRAL"
+                    ));
+                }
+            }
+        }
+        items.sort((a, b) -> Double.compare(asDouble(b.get("tvl")), asDouble(a.get("tvl"))));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", totalTvl > 0 ? "CONNECTED" : "FETCH_FAILED");
+        result.put("source", "DEFILLAMA_CHAINS_FREE");
+        result.put("totalTvlUsd", round(totalTvl));
+        result.put("watchedTvlUsd", round(watchedTvl));
+        result.put("weightedChange1d", watchedTvl > 0 ? round(weightedChange / watchedTvl) : 0);
+        result.put("items", items.stream().limit(8).toList());
+        result.put("rule", "Major-chain TVL rising supports risk-on; broad TVL falling reduces long confidence.");
+        return result;
+    }
+
+    private double peggedUsdValue(Object value) {
+        if (value instanceof Number number) return number.doubleValue();
+        if (value instanceof Map<?, ?> map) {
+            return numberValue(map.get("peggedUSD"));
+        }
+        return 0;
+    }
+
     private List<Map<String, Object>> buildWhaleStatus() {
         if (!hasEnv("WHALE_ALERT_API_KEY") && !hasEnv("GLASSNODE_API_KEY") && !hasEnv("CRYPTOQUANT_API_KEY")) {
             return List.of(Map.of(
@@ -436,6 +572,7 @@ public class CryptoTradingService {
                 Map.of("source", "Yahoo Finance free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "S&P500, DXY, US10Y and VIX macro crisis checks."),
                 Map.of("source", "Alternative.me", "status", "CONNECTED_WHEN_AVAILABLE", "message", "Crypto Fear & Greed Index."),
                 Map.of("source", "CoinGecko free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "BTC dominance, total crypto market cap and stablecoin liquidity proxy."),
+                Map.of("source", "DeFiLlama free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "No-key stablecoin supply, USDT/USDC liquidity and major-chain TVL used in on-chain/macro score."),
                 Map.of("source", "X/Twitter trusted accounts", "status", hasEnv("X_BEARER_TOKEN") || hasEnv("TWITTER_BEARER_TOKEN") ? "CONNECTED_WHEN_AVAILABLE" : "X_BEARER_TOKEN_REQUIRED", "message", "Automated watchlist: Lookonchain, Whale Alert, WuBlockchain, WatcherGuru, CoinDesk, The Block, Arkham, Glassnode, CryptoQuant and CoinGlass."),
                 Map.of("source", "Arkham / Lookonchain / Whale Alert / DeBank / DexScreener", "status", "MANUAL_FREE_WATCH", "message", "Whale/entity watchlist sources; provider API keys can automate deeper tracking."),
                 Map.of("source", "Glassnode / CryptoQuant / CoinGlass", "status", hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY") || hasEnv("COINGLASS_API_KEY") ? "KEY_READY" : "OPTIONAL_KEYS", "message", "Exchange reserve, netflow, whale ratio, liquidations and on-chain metrics.")
@@ -1209,9 +1346,16 @@ public class CryptoTradingService {
         double openInterest = asDouble(futures.get("openInterest"));
         String macroRisk = String.valueOf(macroStatus.getOrDefault("macroRisk", "UNKNOWN"));
         String externalRisk = String.valueOf(externalFeeds.getOrDefault("externalRisk", "UNKNOWN"));
+        double defiStablecoinChange = asDouble(macroStatus.get("defiLlamaStablecoinChange1d"));
+        double defiTvlChange = asDouble(macroStatus.get("defiLlamaTvlChange1d"));
+        double defiLiquidityScore = clampScore(50
+                + defiStablecoinChange * 12
+                + defiTvlChange * 5
+                + (asDouble(macroStatus.get("defiLlamaStablecoinTotalUsd")) > 0 ? 5 : 0));
 
         double whaleScore = clampScore(48
                 + smartMoneyScore * 0.28
+                + (defiStablecoinChange >= 0.25 ? 6 : defiStablecoinChange <= -0.25 ? -7 : 0)
                 + (volumeSpike >= 2 ? 12 : volumeSpike >= 1.4 ? 6 : 0)
                 + (openInterest > 0 ? 4 : 0)
                 + (longShortRatio >= 1.05 ? 5 : longShortRatio <= 0.95 ? -5 : 0));
@@ -1219,6 +1363,7 @@ public class CryptoTradingService {
                 + change7d * 1.1
                 + change24h * 1.6
                 + (volumeScore - 50) * 0.35
+                + (defiLiquidityScore - 50) * 0.35
                 + ("HIGH".equals(externalRisk) ? -12 : "MEDIUM".equals(externalRisk) ? -5 : 4));
         double derivativesScore = clampScore(futuresScore
                 + (Math.abs(fundingRate) < 0.0004 ? 5 : -6)
@@ -1228,6 +1373,8 @@ public class CryptoTradingService {
         double weightedTechnicalScore = clampScore(technicalScore * 0.55 + scoreFromIndicators * 0.45);
         double sentimentScore = clampScore(62
                 + ("HIGH".equals(newsRisk) ? -24 : "NORMAL".equals(newsRisk) ? 7 : 0)
+                + (defiStablecoinChange >= 0.3 ? 6 : defiStablecoinChange <= -0.3 ? -8 : 0)
+                + (defiTvlChange >= 1 ? 5 : defiTvlChange <= -1 ? -6 : 0)
                 + ("HIGH".equals(macroRisk) ? -20 : "MEDIUM".equals(macroRisk) ? -8 : "NORMAL".equals(macroRisk) ? 8 : 0));
 
         Map<String, Object> scores = new LinkedHashMap<>();
@@ -1237,15 +1384,18 @@ public class CryptoTradingService {
         scores.put("derivativesScore", round(derivativesScore));
         scores.put("technicalScore", round(weightedTechnicalScore));
         scores.put("sentimentScore", round(sentimentScore));
+        scores.put("defiLlamaLiquidityScore", round(defiLiquidityScore));
+        scores.put("defiLlamaStablecoinChange1d", round(defiStablecoinChange));
+        scores.put("defiLlamaTvlChange1d", round(defiTvlChange));
         scores.put("whaleDirection", directionFromScore(whaleScore, change24h, longShortRatio));
-        scores.put("onchainDirection", directionFromScore(onchainScore, change7d, 1));
+        scores.put("onchainDirection", directionFromScore(onchainScore, change7d + defiStablecoinChange + defiTvlChange * 0.35, 1));
         scores.put("derivativesDirection", directionFromScore(derivativesScore, change1h, longShortRatio));
         scores.put("technicalDirection", "LONG".equals(technicalSignal) || "SHORT".equals(technicalSignal) ? technicalSignal : directionFromScore(weightedTechnicalScore, change24h, 1));
         scores.put("sentimentDirection", sentimentScore >= 60 ? "LONG" : sentimentScore <= 42 ? "SHORT" : "NO_TRADE");
         scores.put("indicators", groupedIndicatorNames());
         scores.put("sources", Map.of(
                 "whale", "Binance large trades + volume spike now; Arkham/Lookonchain/Whale Alert/DeBank/DexScreener manual watch; Glassnode/CryptoQuant keys improve it",
-                "onchain", "Exchange reserve, netflow, active addresses, MVRV, SOPR, NUPL, realized price and miner reserve need Glassnode/CryptoQuant keys",
+                "onchain", "DeFiLlama no-key stablecoin supply/USDT/USDC/chain TVL now; exchange reserve, netflow, active addresses, MVRV, SOPR, NUPL need Glassnode/CryptoQuant keys",
                 "derivatives", "Binance funding, open interest, long/short, liquidation proxy, taker flow proxy, futures premium and basis",
                 "technical", "RSI, MACD, EMA 20/50/200, VWAP, Bollinger Bands, ATR, ADX, Supertrend",
                 "sentiment", "BTC dominance, Fear & Greed, DXY, yields, ETF flow, stablecoin market cap; news stays low-weight risk filter"

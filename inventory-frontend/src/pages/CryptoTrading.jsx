@@ -550,6 +550,20 @@ function buildMacroFeedItems(macro = {}) {
   if (macro.stablecoinMarketCap?.totalUsd) {
     rows.push({ asset: "Stablecoins", signal: "LIQUIDITY", title: formatUsd(macro.stablecoinMarketCap.totalUsd) });
   }
+  if (macro.defiLlamaStablecoinTotalUsd) {
+    rows.push({
+      asset: "DeFiLlama Stablecoins",
+      signal: Number(macro.defiLlamaStablecoinChange1d || 0) >= 0 ? "RISK_ON" : "RISK_OFF",
+      title: `${formatUsd(macro.defiLlamaStablecoinTotalUsd)} | 1d ${formatPercent(macro.defiLlamaStablecoinChange1d)} | USDT ${formatUsd(macro.defiLlamaUsdtMarketCap)}`
+    });
+  }
+  if (macro.defiLlamaTvlUsd) {
+    rows.push({
+      asset: "DeFiLlama Chain TVL",
+      signal: Number(macro.defiLlamaTvlChange1d || 0) >= 0 ? "RISK_ON" : "RISK_OFF",
+      title: `${formatUsd(macro.defiLlamaTvlUsd)} | 1d ${formatPercent(macro.defiLlamaTvlChange1d)}`
+    });
+  }
   return rows;
 }
 
