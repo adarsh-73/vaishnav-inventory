@@ -30,12 +30,15 @@ public class CryptoTradingService {
     private static final int MAX_DAILY_PAPER_TRADES = 5;
     private static final long CMC_CACHE_SECONDS = 60;
     private static final long FUTURES_INTEL_CACHE_SECONDS = 60;
+    private static final long MACRO_CACHE_SECONDS = 300;
     private static final long EXTERNAL_FEED_CACHE_SECONDS = 300;
 
     private volatile Map<String, Map<String, Object>> cachedMarketPrices;
     private volatile Instant cachedMarketPricesAt;
     private volatile Map<String, Map<String, Object>> cachedFuturesIntel;
     private volatile Instant cachedFuturesIntelAt;
+    private volatile Map<String, Object> cachedMacroStatus;
+    private volatile Instant cachedMacroStatusAt;
     private volatile Map<String, Object> cachedExternalFeeds;
     private volatile Instant cachedExternalFeedsAt;
 
@@ -168,39 +171,207 @@ public class CryptoTradingService {
     }
 
     private Map<String, Object> fetchMacroStatus() {
+        Map<String, Object> cached = cachedMacroStatus;
+        if (cached != null
+                && cachedMacroStatusAt != null
+                && Instant.now().minusSeconds(MACRO_CACHE_SECONDS).isBefore(cachedMacroStatusAt)) {
+            return cached;
+        }
+
         Map<String, Object> macro = new LinkedHashMap<>();
-        macro.put("sp500", hasEnv("TWELVEDATA_API_KEY") || hasEnv("ALPHAVANTAGE_API_KEY") ? "API_READY" : "Add TWELVEDATA_API_KEY or ALPHAVANTAGE_API_KEY for S&P 500 confirmation.");
-        macro.put("dxy", hasEnv("TWELVEDATA_API_KEY") || hasEnv("ALPHAVANTAGE_API_KEY") ? "API_READY" : "Add macro API for DXY risk filter.");
+        macro.put("sp500", "FREE_YAHOO_WAITING");
+        macro.put("dxy", "FREE_YAHOO_WAITING");
+        macro.put("usYields", "FREE_YAHOO_WAITING");
+        macro.put("vix", "FREE_YAHOO_WAITING");
+        macro.put("fearGreed", "FREE_ALTERNATIVE_ME_WAITING");
+        macro.put("cryptoGlobal", "FREE_COINGECKO_WAITING");
         macro.put("macroRisk", "UNKNOWN");
-        macro.put("rule", "Crypto longs are filtered harder when S&P 500 risk-off or DXY strong.");
-        String alphaKey = System.getenv("ALPHAVANTAGE_API_KEY");
-        if (alphaKey == null || alphaKey.isBlank()) return macro;
+        macro.put("rule", "Rohit-style macro guard: S&P500, DXY, US yields, VIX, Fear & Greed, BTC dominance, total crypto market cap and stablecoin liquidity filter every trade.");
+        macro.put("sources", List.of(
+                "Yahoo Finance free chart: S&P500, DXY proxy, US10Y, VIX",
+                "Alternative.me: Crypto Fear & Greed",
+                "CoinGecko global: BTC dominance and total crypto market cap",
+                "CoinGecko markets: stablecoin market cap proxy",
+                "AlphaVantage optional: SPY/UUP fallback"
+        ));
 
         try {
-            RestTemplate restTemplate = new RestTemplate();
-            Map<?, ?> spy = restTemplate.getForObject(
-                    "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=SPY&apikey=" + alphaKey,
-                    Map.class
-            );
-            Map<?, ?> uup = restTemplate.getForObject(
-                    "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=UUP&apikey=" + alphaKey,
-                    Map.class
-            );
-            double spyChange = parsePercent(globalQuoteValue(spy, "10. change percent"));
-            double uupChange = parsePercent(globalQuoteValue(uup, "10. change percent"));
-            macro.put("sp500", "CONNECTED");
-            macro.put("sp500Proxy", "SPY");
-            macro.put("sp500ChangePercent", round(spyChange));
-            macro.put("dxy", "CONNECTED");
-            macro.put("dxyProxy", "UUP");
-            macro.put("dxyChangePercent", round(uupChange));
-            macro.put("macroRisk", spyChange <= -1.0 || uupChange >= 0.8 ? "HIGH" : spyChange <= -0.35 || uupChange >= 0.35 ? "MEDIUM" : "NORMAL");
-            macro.put("rule", "SPY down or UUP/DXY proxy strong means crypto longs need stronger confirmation.");
+            Map<String, Object> sp500 = fetchYahooQuote("^GSPC");
+            Map<String, Object> dxy = fetchYahooQuote("DX-Y.NYB");
+            Map<String, Object> us10y = fetchYahooQuote("^TNX");
+            Map<String, Object> vix = fetchYahooQuote("^VIX");
+            macro.put("sp500", valueOrStatus(sp500));
+            macro.put("sp500ChangePercent", asDouble(sp500.get("changePercent")));
+            macro.put("dxy", valueOrStatus(dxy));
+            macro.put("dxyChangePercent", asDouble(dxy.get("changePercent")));
+            macro.put("usYields", valueOrStatus(us10y));
+            macro.put("us10yChangePercent", asDouble(us10y.get("changePercent")));
+            macro.put("vix", valueOrStatus(vix));
+            macro.put("vixChangePercent", asDouble(vix.get("changePercent")));
         } catch (Exception error) {
-            macro.put("macroRisk", "UNKNOWN");
-            macro.put("warning", "AlphaVantage macro fetch failed. Check ALPHAVANTAGE_API_KEY.");
+            macro.put("freeMarketWarning", "Yahoo macro fetch failed; optional AlphaVantage fallback will be tried if key exists.");
         }
+
+        try {
+            Map<String, Object> fearGreed = fetchFearGreed();
+            macro.put("fearGreed", fearGreed);
+            macro.put("fearGreedValue", asDouble(fearGreed.get("value")));
+            macro.put("fearGreedLabel", fearGreed.get("label"));
+        } catch (Exception error) {
+            macro.put("fearGreed", Map.of("status", "FETCH_FAILED"));
+        }
+
+        try {
+            Map<String, Object> cryptoGlobal = fetchCoinGeckoGlobal();
+            macro.put("cryptoGlobal", cryptoGlobal);
+            macro.put("btcDominance", asDouble(cryptoGlobal.get("btcDominance")));
+            macro.put("totalCryptoMarketCapChange24h", asDouble(cryptoGlobal.get("marketCapChange24h")));
+        } catch (Exception error) {
+            macro.put("cryptoGlobal", Map.of("status", "FETCH_FAILED"));
+        }
+
+        try {
+            Map<String, Object> stablecoins = fetchStablecoinMarketCap();
+            macro.put("stablecoinMarketCap", stablecoins);
+        } catch (Exception error) {
+            macro.put("stablecoinMarketCap", Map.of("status", "FETCH_FAILED"));
+        }
+
+        String alphaKey = System.getenv("ALPHAVANTAGE_API_KEY");
+        if (alphaKey != null && !alphaKey.isBlank()) {
+            RestTemplate restTemplate = new RestTemplate();
+            try {
+                Map<?, ?> spy = restTemplate.getForObject(
+                        "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=SPY&apikey=" + alphaKey,
+                        Map.class
+                );
+                Map<?, ?> uup = restTemplate.getForObject(
+                        "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=UUP&apikey=" + alphaKey,
+                        Map.class
+                );
+                double spyChange = parsePercent(globalQuoteValue(spy, "10. change percent"));
+                double uupChange = parsePercent(globalQuoteValue(uup, "10. change percent"));
+                if (asDouble(macro.get("sp500ChangePercent")) == 0) macro.put("sp500ChangePercent", round(spyChange));
+                if (asDouble(macro.get("dxyChangePercent")) == 0) macro.put("dxyChangePercent", round(uupChange));
+                macro.put("alphaVantage", "CONNECTED_SPY_UUP");
+            } catch (Exception error) {
+                macro.put("alphaVantage", "FETCH_FAILED");
+            }
+        }
+
+        double sp500Change = asDouble(macro.get("sp500ChangePercent"));
+        double dxyChange = asDouble(macro.get("dxyChangePercent"));
+        double yieldChange = asDouble(macro.get("us10yChangePercent"));
+        double vixChange = asDouble(macro.get("vixChangePercent"));
+        double fearGreedValue = asDouble(macro.get("fearGreedValue"));
+        double cryptoMcapChange = asDouble(macro.get("totalCryptoMarketCapChange24h"));
+
+        String risk = sp500Change <= -1.0 || dxyChange >= 0.75 || yieldChange >= 1.0 || vixChange >= 8 || (fearGreedValue > 0 && fearGreedValue <= 25)
+                ? "HIGH"
+                : sp500Change <= -0.35 || dxyChange >= 0.35 || yieldChange >= 0.45 || vixChange >= 3.5 || cryptoMcapChange <= -2.5 || (fearGreedValue > 0 && fearGreedValue <= 40)
+                ? "MEDIUM"
+                : "NORMAL";
+        macro.put("macroRisk", risk);
+        macro.put("macroBias", dxyChange > 0.35 || sp500Change < -0.35 || vixChange > 3.5 ? "RISK_OFF" : cryptoMcapChange > 1.5 && sp500Change >= 0 ? "RISK_ON" : "NEUTRAL");
+        macro.put("rule", "Longs need stronger confirmation when S&P is red, DXY/yields/VIX are rising, Fear & Greed is extreme fear, or total crypto market cap is falling.");
+        cachedMacroStatus = macro;
+        cachedMacroStatusAt = Instant.now();
         return macro;
+    }
+
+    private Object valueOrStatus(Map<String, Object> quote) {
+        if (quote == null || quote.isEmpty()) return "FETCH_FAILED";
+        return quote;
+    }
+
+    private Map<String, Object> fetchYahooQuote(String symbol) {
+        try {
+            Map<?, ?> response = new RestTemplate().getForObject(
+                    "https://query1.finance.yahoo.com/v8/finance/chart/" + symbol + "?range=2d&interval=1d",
+                    Map.class
+            );
+            Object chartObj = response == null ? null : response.get("chart");
+            Object resultObj = chartObj instanceof Map<?, ?> chart ? chart.get("result") : null;
+            if (!(resultObj instanceof List<?> results) || results.isEmpty() || !(results.get(0) instanceof Map<?, ?> result)) {
+                return Map.of("status", "FETCH_FAILED", "symbol", symbol);
+            }
+            Object metaObj = result.get("meta");
+            Map<?, ?> meta = metaObj instanceof Map<?, ?> map ? map : Map.of();
+            double price = numberValue(meta.get("regularMarketPrice"));
+            double previousClose = numberValue(meta.get("chartPreviousClose"));
+            double changePercent = previousClose == 0 ? 0 : ((price - previousClose) * 100 / previousClose);
+            return Map.of(
+                    "status", "CONNECTED",
+                    "source", "YAHOO_FINANCE_FREE",
+                    "symbol", symbol,
+                    "price", round(price),
+                    "previousClose", round(previousClose),
+                    "changePercent", round(changePercent)
+            );
+        } catch (Exception error) {
+            return Map.of("status", "FETCH_FAILED", "symbol", symbol);
+        }
+    }
+
+    private Map<String, Object> fetchFearGreed() {
+        Map<?, ?> response = new RestTemplate().getForObject("https://api.alternative.me/fng/?limit=1", Map.class);
+        Object dataObj = response == null ? null : response.get("data");
+        if (!(dataObj instanceof List<?> data) || data.isEmpty() || !(data.get(0) instanceof Map<?, ?> item)) {
+            return Map.of("status", "FETCH_FAILED");
+        }
+        return Map.of(
+                "status", "CONNECTED",
+                "source", "ALTERNATIVE_ME",
+                "value", parseDouble(item.get("value")),
+                "label", String.valueOf(item.containsKey("value_classification") ? item.get("value_classification") : "UNKNOWN"),
+                "updatedAt", String.valueOf(item.containsKey("timestamp") ? item.get("timestamp") : "")
+        );
+    }
+
+    private Map<String, Object> fetchCoinGeckoGlobal() {
+        Map<?, ?> response = new RestTemplate().getForObject("https://api.coingecko.com/api/v3/global", Map.class);
+        Object dataObj = response == null ? null : response.get("data");
+        if (!(dataObj instanceof Map<?, ?> data)) return Map.of("status", "FETCH_FAILED");
+        Object dominanceObj = data.get("market_cap_percentage");
+        Map<?, ?> dominance = dominanceObj instanceof Map<?, ?> map ? map : Map.of();
+        Object marketCapObj = data.get("total_market_cap");
+        Map<?, ?> marketCap = marketCapObj instanceof Map<?, ?> map ? map : Map.of();
+        return Map.of(
+                "status", "CONNECTED",
+                "source", "COINGECKO_GLOBAL_FREE",
+                "btcDominance", round(numberValue(dominance.get("btc"))),
+                "ethDominance", round(numberValue(dominance.get("eth"))),
+                "totalMarketCapUsd", round(numberValue(marketCap.get("usd"))),
+                "marketCapChange24h", round(numberValue(data.get("market_cap_change_percentage_24h_usd")))
+        );
+    }
+
+    private Map<String, Object> fetchStablecoinMarketCap() {
+        Object response = new RestTemplate().getForObject(
+                "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=tether,usd-coin,dai,first-digital-usd&order=market_cap_desc&per_page=10&page=1&sparkline=false",
+                Object.class
+        );
+        double total = 0;
+        List<Map<String, Object>> items = new ArrayList<>();
+        if (response instanceof List<?> coins) {
+            for (Object coinObj : coins) {
+                if (!(coinObj instanceof Map<?, ?> coin)) continue;
+                double marketCap = numberValue(coin.get("market_cap"));
+                total += marketCap;
+                items.add(Map.of(
+                        "name", String.valueOf(coin.containsKey("name") ? coin.get("name") : "Stablecoin"),
+                        "symbol", String.valueOf(coin.containsKey("symbol") ? coin.get("symbol") : ""),
+                        "marketCap", round(marketCap),
+                        "change24h", round(numberValue(coin.get("price_change_percentage_24h")))
+                ));
+            }
+        }
+        return Map.of(
+                "status", items.isEmpty() ? "FETCH_FAILED" : "CONNECTED",
+                "source", "COINGECKO_STABLECOIN_PROXY",
+                "totalUsd", round(total),
+                "items", items
+        );
     }
 
     private List<Map<String, Object>> buildWhaleStatus() {

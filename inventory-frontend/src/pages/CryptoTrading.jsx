@@ -238,6 +238,7 @@ function CryptoTrading() {
         <div style={feedGrid}>
           <FeedList title="Whale / Exchange Flow" status={dashboard.intelligence?.whaleFeed} items={dashboard.intelligence?.topWhales} />
           <FeedList title="Verified News" status={dashboard.intelligence?.newsFeed} items={dashboard.intelligence?.verifiedNews} />
+          <FeedList title="Macro Crisis Radar" status={dashboard.intelligence?.macro?.macroRisk} items={buildMacroFeedItems(dashboard.intelligence?.macro)} />
           <FeedList title="ETF Rotation Proxy" status={dashboard.intelligence?.etfFeed} items={dashboard.intelligence?.etfFlows} />
           <FeedList title="Free Whale Watchlist" status="MANUAL_FREE_SOURCES" items={dashboard.intelligence?.freeWhaleSources} />
         </div>
@@ -530,6 +531,23 @@ function buildLiveAlerts(dashboard) {
     alerts.push({ id: "calm", type: "Status", title: "No major alert", detail: "System normal monitoring mode me hai.", color: "#0f2963" });
   }
   return alerts;
+}
+
+function buildMacroFeedItems(macro = {}) {
+  if (!macro || Object.keys(macro).length === 0) return [];
+  const rows = [
+    { asset: "S&P 500", signal: macro.sp500ChangePercent >= 0 ? "RISK_ON" : "RISK_OFF", title: `Change ${formatPercent(macro.sp500ChangePercent)}` },
+    { asset: "DXY", signal: macro.dxyChangePercent > 0.35 ? "RISK_OFF" : "NEUTRAL", title: `Dollar change ${formatPercent(macro.dxyChangePercent)}` },
+    { asset: "US Yields", signal: macro.us10yChangePercent > 0.45 ? "RISK_OFF" : "NEUTRAL", title: `10Y change ${formatPercent(macro.us10yChangePercent)}` },
+    { asset: "VIX", signal: macro.vixChangePercent > 3.5 ? "RISK_OFF" : "NEUTRAL", title: `Fear index change ${formatPercent(macro.vixChangePercent)}` },
+    { asset: "Fear & Greed", signal: Number(macro.fearGreedValue || 0) <= 25 ? "RISK_OFF" : "NEUTRAL", title: `${macro.fearGreedValue || "-"} ${macro.fearGreedLabel || ""}` },
+    { asset: "BTC Dominance", signal: "INFO", title: `${formatPercentPlain(macro.btcDominance)} dominance` },
+    { asset: "Crypto MCap", signal: Number(macro.totalCryptoMarketCapChange24h || 0) >= 0 ? "RISK_ON" : "RISK_OFF", title: `24h ${formatPercent(macro.totalCryptoMarketCapChange24h)}` }
+  ];
+  if (macro.stablecoinMarketCap?.totalUsd) {
+    rows.push({ asset: "Stablecoins", signal: "LIQUIDITY", title: formatUsd(macro.stablecoinMarketCap.totalUsd) });
+  }
+  return rows;
 }
 
 function buildDashboard(settings) {
