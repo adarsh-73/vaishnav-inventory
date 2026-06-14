@@ -163,6 +163,8 @@ public class CryptoTradingService {
         intelligence.put("freeWhaleSources", nestedValue(externalFeeds, "whales", "freeSources"));
         intelligence.put("verifiedNews", nestedValue(externalFeeds, "news", "items"));
         intelligence.put("etfFlows", nestedValue(externalFeeds, "etf", "items"));
+        intelligence.put("sourceRadar", nestedValue(externalFeeds, "sources", "items"));
+        intelligence.put("sourceRadarStatus", nestedValue(externalFeeds, "sources", "status"));
         intelligence.put("smartMoneyScore", externalFeeds.get("smartMoneyScore"));
         intelligence.put("externalRisk", externalFeeds.get("externalRisk"));
         intelligence.put("symbols", futuresIntel);
@@ -401,6 +403,7 @@ public class CryptoTradingService {
         Map<String, Object> news = fetchCryptoPanicNews();
         Map<String, Object> whales = buildWhaleFlowFeed(marketPrices, futuresIntel);
         Map<String, Object> etf = fetchEtfProxyFeed();
+        Map<String, Object> sources = buildSourceRadarFeed();
         int smartMoneyScore = calculateSmartMoneyScore(whales, etf, news, macroStatus);
         String externalRisk = smartMoneyScore <= 38 || "HIGH".equals(news.get("risk")) ? "HIGH"
                 : smartMoneyScore <= 55 || "MEDIUM".equals(news.get("risk")) ? "MEDIUM"
@@ -410,12 +413,32 @@ public class CryptoTradingService {
         feeds.put("news", news);
         feeds.put("whales", whales);
         feeds.put("etf", etf);
+        feeds.put("sources", sources);
         feeds.put("smartMoneyScore", smartMoneyScore);
         feeds.put("externalRisk", externalRisk);
         feeds.put("sourceNote", "Primary focus: Binance futures, CMC market structure, whale/exchange-flow proxy, ETF/macro proxy. News is low-weight risk filter only.");
         cachedExternalFeeds = feeds;
         cachedExternalFeedsAt = Instant.now();
         return feeds;
+    }
+
+    private Map<String, Object> buildSourceRadarFeed() {
+        List<Map<String, Object>> items = List.of(
+                Map.of("source", "Retirement Labs video", "status", "REFERENCE", "message", "Macro crisis framing: geopolitics, stocks, crypto structure and risk management."),
+                Map.of("source", "Prezerv / EdgeX", "status", "REFERENCE", "message", "User-shared signal style reference; app does not copy claims, it validates with data."),
+                Map.of("source", "CoinMarketCap", "status", hasEnv("COINMARKETCAP_API_KEY") || hasEnv("CMC_API_KEY") ? "CONNECTED" : "KEY_REQUIRED", "message", "BTC/ETH/SOL/BNB live price, volume, market cap and momentum."),
+                Map.of("source", "Binance Futures public", "status", "CONNECTED_WHEN_AVAILABLE", "message", "Open interest, funding, long/short, volume spike, premium/basis proxy and large trade proxy."),
+                Map.of("source", "Yahoo Finance free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "S&P500, DXY, US10Y and VIX macro crisis checks."),
+                Map.of("source", "Alternative.me", "status", "CONNECTED_WHEN_AVAILABLE", "message", "Crypto Fear & Greed Index."),
+                Map.of("source", "CoinGecko free", "status", "CONNECTED_WHEN_AVAILABLE", "message", "BTC dominance, total crypto market cap and stablecoin liquidity proxy."),
+                Map.of("source", "Arkham / Lookonchain / Whale Alert / DeBank / DexScreener", "status", "MANUAL_FREE_WATCH", "message", "Whale/entity watchlist sources; provider API keys can automate deeper tracking."),
+                Map.of("source", "Glassnode / CryptoQuant / CoinGlass", "status", hasEnv("GLASSNODE_API_KEY") || hasEnv("CRYPTOQUANT_API_KEY") || hasEnv("COINGLASS_API_KEY") ? "KEY_READY" : "OPTIONAL_KEYS", "message", "Exchange reserve, netflow, whale ratio, liquidations and on-chain metrics.")
+        );
+        return Map.of(
+                "status", "ROHIT_STYLE_SOURCE_STACK",
+                "items", items,
+                "rule", "No source gets blind trust. Every signal must be confirmed by price, derivatives, macro and risk checks."
+        );
     }
 
     private Map<String, Object> fetchCryptoPanicNews() {

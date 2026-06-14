@@ -239,6 +239,7 @@ function CryptoTrading() {
           <FeedList title="Whale / Exchange Flow" status={dashboard.intelligence?.whaleFeed} items={dashboard.intelligence?.topWhales} />
           <FeedList title="Verified News" status={dashboard.intelligence?.newsFeed} items={dashboard.intelligence?.verifiedNews} />
           <FeedList title="Macro Crisis Radar" status={dashboard.intelligence?.macro?.macroRisk} items={buildMacroFeedItems(dashboard.intelligence?.macro)} />
+          <FeedList title="Source Radar" status={dashboard.intelligence?.sourceRadarStatus} items={dashboard.intelligence?.sourceRadar} />
           <FeedList title="ETF Rotation Proxy" status={dashboard.intelligence?.etfFeed} items={dashboard.intelligence?.etfFlows} />
           <FeedList title="Free Whale Watchlist" status="MANUAL_FREE_SOURCES" items={dashboard.intelligence?.freeWhaleSources} />
         </div>
@@ -576,6 +577,8 @@ function buildDashboard(settings) {
       newsFeed: "WAITING",
       etfFeed: "WAITING",
       topWhales: [],
+      sourceRadar: [],
+      sourceRadarStatus: "WAITING",
       freeWhaleSources: [],
       verifiedNews: [],
       etfFlows: []
