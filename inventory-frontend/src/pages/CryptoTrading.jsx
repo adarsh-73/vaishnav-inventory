@@ -4,7 +4,8 @@ import { apiRequest } from "../utils/api";
 const MARKETS = {
   BTC: { name: "Bitcoin", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 71 },
   ETH: { name: "Ethereum", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 47 },
-  SOL: { name: "Solana", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 59 }
+  SOL: { name: "Solana", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 59 },
+  BNB: { name: "BNB", price: 0, atr15: 0, atr1h: 0, atr4h: 0, seed: 43 }
 };
 
 const AI_ENGINES = ["ChatGPT", "Gemini", "DeepSeek", "Claude", "Local ML", "Risk AI"];
@@ -20,7 +21,7 @@ const INDICATORS = [
   "Open Interest", "Open Interest Change", "Funding Rate", "Premium Index", "Basis", "Long Short Ratio", "Top Trader Ratio", "Liquidation Heatmap", "Liquidation Cluster", "Mark Price Deviation",
   "Support Resistance", "Pivot Points", "Fibonacci Retracement", "Fibonacci Extension", "Market Structure", "Higher High Lower Low", "Breakout Strength", "Retest Quality", "Liquidity Sweep", "Fair Value Gap",
   "Order Block", "Supply Demand Zone", "Candle Pattern", "Engulfing Pattern", "Pin Bar", "Doji", "Inside Bar", "Range Compression", "Session High Low", "Previous Day High Low",
-  "Correlation BTC ETH", "Correlation BTC SOL", "Dollar Index Proxy", "Crypto Fear Greed", "News Sentiment", "Social Volume", "AI Hallucination Check", "Signal Agreement Score", "Risk Reward Ratio", "Slippage Estimate"
+  "Correlation BTC ETH", "Correlation BTC SOL", "Correlation BTC BNB", "Dollar Index Proxy", "Crypto Fear Greed", "News Sentiment", "Social Volume", "AI Hallucination Check", "Signal Agreement Score", "Risk Reward Ratio", "Slippage Estimate"
 ];
 
 function CryptoTrading() {
@@ -154,7 +155,7 @@ function CryptoTrading() {
       <section style={heroStyle}>
         <div>
           <div style={eyebrowStyle}>Crypto Auto Trading Command Center</div>
-          <h1 style={titleStyle}>BTC / ETH / SOL AI Paper Trader</h1>
+          <h1 style={titleStyle}>BTC / ETH / SOL / BNB AI Paper Trader</h1>
           <div style={subtitleStyle}>1 month paper monitoring, then Binance testnet/live only after risk checks pass.</div>
         </div>
         <div style={heroStats}>
@@ -218,11 +219,11 @@ function CryptoTrading() {
           <span style={pillStyle}>A to Z decision flow</span>
         </div>
         <div style={strategyGrid}>
-          <Info label="Price" value="CoinMarketCap live BTC/ETH/SOL" />
-          <Info label="Indicators" value="MA 50/100/200, EMA, RSI, MACD, BB, ATR, VWAP, S/R" />
-          <Info label="Futures" value="Funding, open interest, long/short ratio, volume spike" />
-          <Info label="Whale Proxy" value="Large volume + Binance flow now, real whale API keys next" />
-          <Info label="Macro" value="S&P500/SPY, dollar/UUP, CPI/Fed/geopolitical risk filter" />
+          <Info label="Price" value="CoinMarketCap live BTC/ETH/SOL/BNB" />
+          <Info label="Indicators" value="RSI, MACD, EMA 20/50/200, VWAP, BB, ATR, ADX, Supertrend" />
+          <Info label="Derivatives" value="OI, OI change, funding, long/short, liquidation, taker flow, basis" />
+          <Info label="Whale / On-chain" value="Exchange reserve, netflow, whale buy/sell, stablecoin and smart-money flow" />
+          <Info label="Macro" value="DXY, US yields, S&P500, ETF flow, Fear & Greed, stablecoin market cap" />
           <Info label="Entry Rule" value="75%+ score, 2+ timeframes, RR 1:2+, no high risk" />
         </div>
       </section>
@@ -360,7 +361,7 @@ function CryptoTrading() {
             <Info label="Technical 15%" value={`${scoreValue(selectedPlan.categoryScores?.technicalScore)} ${selectedPlan.categoryScores?.technicalDirection || ""}`} />
             <Info label="Sentiment 5%" value={`${scoreValue(selectedPlan.categoryScores?.sentimentScore)} ${selectedPlan.categoryScores?.sentimentDirection || ""}`} />
           </div>
-          <div style={formulaNote}>{selectedPlan.categoryScores?.formula || "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%"}</div>
+          <div style={formulaNote}>{selectedPlan.categoryScores?.formula || "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + Macro/News 5%"}</div>
           <div style={ruleList}>
             {selectedPlan.rules.map((rule) => (
               <div key={rule.name} style={rule.pass ? ruleOk : ruleBad}>
@@ -733,7 +734,7 @@ function buildPlan(symbol, settings) {
     signalGrade: "WAIT",
     categoryAligned: false,
     categoryScores: {
-      formula: "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%",
+      formula: "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + Macro/News 5%",
       whaleScore: 0,
       onchainScore: 0,
       derivativesScore: 0,

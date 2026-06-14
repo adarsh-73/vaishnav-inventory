@@ -24,7 +24,7 @@ import java.util.*;
 @Service
 public class CryptoTradingService {
 
-    private static final List<String> SYMBOLS = List.of("BTCUSDT", "ETHUSDT", "SOLUSDT");
+    private static final List<String> SYMBOLS = List.of("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT");
     private static final List<String> AI_ENGINES = List.of("ChatGPT", "Gemini", "DeepSeek", "Claude", "Risk AI");
     private static final int INDICATOR_COUNT = 100;
     private static final int MAX_DAILY_PAPER_TRADES = 5;
@@ -163,7 +163,7 @@ public class CryptoTradingService {
         intelligence.put("smartMoneyScore", externalFeeds.get("smartMoneyScore"));
         intelligence.put("externalRisk", externalFeeds.get("externalRisk"));
         intelligence.put("symbols", futuresIntel);
-        intelligence.put("rule", "Trade only when CMC + indicators + futures/whale proxy + news risk filters agree.");
+        intelligence.put("rule", "Trade only when whale/on-chain + derivatives + technicals + macro agree. News is only a risk filter, not the main signal.");
         return intelligence;
     }
 
@@ -207,13 +207,13 @@ public class CryptoTradingService {
         if (!hasEnv("WHALE_ALERT_API_KEY") && !hasEnv("GLASSNODE_API_KEY") && !hasEnv("CRYPTOQUANT_API_KEY")) {
             return List.of(Map.of(
                     "status", "API_KEY_REQUIRED",
-                    "message", "50 whale wallet/exchange-flow tracking needs WHALE_ALERT_API_KEY / GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY."
+                    "message", "200+ whale wallet/exchange-flow tracking needs WHALE_ALERT_API_KEY / GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY. Free mode uses Binance large-flow proxy plus manual Arkham/Lookonchain/Whale Alert watchlist."
             ));
         }
 
         return List.of(Map.of(
                 "status", "READY_FOR_PROVIDER",
-                "message", "Whale API key detected. Provider feed wiring can track top 50 whale transfers/exchange inflow-outflow."
+                "message", "Whale/on-chain API key detected. Provider feed wiring can track 200+ whale transfers, exchange reserves and inflow/outflow."
         ));
     }
 
@@ -241,7 +241,7 @@ public class CryptoTradingService {
         feeds.put("etf", etf);
         feeds.put("smartMoneyScore", smartMoneyScore);
         feeds.put("externalRisk", externalRisk);
-        feeds.put("sourceNote", "Free mode uses Google News/RSS + Binance public futures. Paid APIs are optional.");
+        feeds.put("sourceNote", "Primary focus: Binance futures, CMC market structure, whale/exchange-flow proxy, ETF/macro proxy. News is low-weight risk filter only.");
         cachedExternalFeeds = feeds;
         cachedExternalFeedsAt = Instant.now();
         return feeds;
@@ -256,7 +256,7 @@ public class CryptoTradingService {
 
         try {
             Map<?, ?> response = new RestTemplate().getForObject(
-                    "https://cryptopanic.com/api/v1/posts/?auth_token=" + apiKey + "&currencies=BTC,ETH,SOL&filter=hot&public=true",
+                    "https://cryptopanic.com/api/v1/posts/?auth_token=" + apiKey + "&currencies=BTC,ETH,SOL,BNB&filter=hot&public=true",
                     Map.class
             );
             Object resultsObj = response == null ? null : response.get("results");
@@ -296,11 +296,10 @@ public class CryptoTradingService {
         Map<String, Object> feed = new LinkedHashMap<>();
         try {
             List<Map<String, Object>> items = new ArrayList<>();
-            items.addAll(fetchGoogleNewsItems("(bitcoin OR ethereum OR solana OR crypto) (ETF OR Fed OR CPI OR SEC OR hack OR war OR liquidity)", "Google News"));
-            items.addAll(fetchGoogleNewsItems("site:coindesk.com (bitcoin OR ethereum OR solana OR crypto)", "CoinDesk"));
-            items.addAll(fetchGoogleNewsItems("site:cointelegraph.com (bitcoin OR ethereum OR solana OR crypto)", "Cointelegraph"));
-            items.addAll(fetchGoogleNewsItems("site:decrypt.co (bitcoin OR ethereum OR solana OR crypto)", "Decrypt"));
-            items.addAll(fetchGoogleNewsItems("site:theblock.co (bitcoin OR ethereum OR solana OR crypto OR ETF)", "The Block"));
+            items.addAll(fetchGoogleNewsItems("site:coindesk.com (bitcoin OR ethereum OR solana OR bnb OR crypto) (ETF OR Fed OR CPI OR SEC OR hack OR liquidity)", "CoinDesk"));
+            items.addAll(fetchGoogleNewsItems("site:theblock.co (bitcoin OR ethereum OR solana OR bnb OR crypto OR ETF)", "The Block"));
+            items.addAll(fetchGoogleNewsItems("site:cointelegraph.com (bitcoin OR ethereum OR solana OR bnb OR crypto)", "Cointelegraph"));
+            items.addAll(fetchGoogleNewsItems("site:decrypt.co (bitcoin OR ethereum OR solana OR bnb OR crypto)", "Decrypt"));
             items = dedupeNews(items).stream().limit(10).toList();
             int danger = 0;
             int positive = 0;
@@ -309,10 +308,10 @@ public class CryptoTradingService {
                 if ("RISK_OFF".equals(sentiment)) danger++;
                 if ("RISK_ON".equals(sentiment)) positive++;
             }
-            feed.put("status", "FREE_GOOGLE_NEWS_RSS");
+            feed.put("status", "FREE_VERIFIED_RSS_RISK_FILTER");
             feed.put("risk", danger >= 2 ? "HIGH" : danger > positive ? "MEDIUM" : "NORMAL");
             feed.put("items", items);
-            feed.put("rule", "Free news mode: CoinDesk, Cointelegraph, Decrypt, The Block and broad Google News headlines are used as risk filters. Paid CryptoPanic is optional.");
+            feed.put("rule", "News is low-weight only: CoinDesk, The Block, Cointelegraph and Decrypt are used to block risky entries, not to force trades.");
             return feed;
         } catch (Exception error) {
             feed.put("status", "FREE_NEWS_FETCH_FAILED");
@@ -400,7 +399,8 @@ public class CryptoTradingService {
                 Map.of("name", "Arkham Intelligence", "use", "Manual wallet labels, entity tracking and alerts", "url", "https://intel.arkm.com/"),
                 Map.of("name", "Lookonchain", "use", "Smart money public posts and wallet activity", "url", "https://lookonchain.com/"),
                 Map.of("name", "Whale Alert", "use", "Large public transfers and exchange movement alerts", "url", "https://whale-alert.io/"),
-                Map.of("name", "DeBank", "use", "DeFi whale portfolios and wallet holdings", "url", "https://debank.com/")
+                Map.of("name", "DeBank", "use", "DeFi whale portfolios and wallet holdings", "url", "https://debank.com/"),
+                Map.of("name", "DexScreener", "use", "Early wallet/DEX volume checks for memecoins and alts", "url", "https://dexscreener.com/")
         ));
         feed.put("rule", providerReady
                 ? "Provider keys detected; Binance proxy active. Provider-specific wallet/exchange-flow endpoints can be expanded by plan."
@@ -445,7 +445,7 @@ public class CryptoTradingService {
         if (alphaKey == null || alphaKey.isBlank()) {
             feed.put("status", "API_KEY_REQUIRED");
             feed.put("items", List.of(Map.of(
-                    "asset", "BTC/ETH/SOL ETF",
+                    "asset", "BTC/ETH/SOL/BNB ETF/Macro",
                     "flow", "Add ALPHAVANTAGE_API_KEY for ETF/macro proxy quotes.",
                     "signal", "WAITING"
             )));
@@ -827,7 +827,7 @@ public class CryptoTradingService {
                 : "LONG=0% SHORT=0% NO_TRADE=100%");
         signal.put("bestAi", aiVotes.get(seed % aiVotes.size()).get("ai"));
         signal.put("indicatorSummary", Map.of("total", INDICATOR_COUNT, "bullish", indicatorBullish, "bearish", INDICATOR_COUNT - indicatorBullish));
-        signal.put("scoreFormula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%");
+        signal.put("scoreFormula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + Macro/News 5%");
         signal.put("technicalSummary", technicalSignal + " | RSI=" + indicators.get("rsi14") + " | MA trend=" + indicators.get("maTrend") + " | MACD=" + indicators.get("macdSignal") + " | Whale=" + Math.round(whaleScore) + " " + whaleDirection + " | On-chain=" + Math.round(onchainScore) + " | Derivatives=" + Math.round(derivativesScore) + " " + derivativesDirection + " | Technical=" + Math.round(weightedTechnicalScore) + " " + technicalDirection + " | Sentiment=" + Math.round(sentimentScore) + " | Grade=" + signalGrade + " | RR=" + riskReward);
         signal.put("newsRisk", newsRisk);
         signal.put("blockReason", allowed ? "" : blockReason(liveCmc, confidence, alignedFrames, newsRisk, finalScore, finalSignal, categoryAligned));
@@ -854,7 +854,7 @@ public class CryptoTradingService {
             headers.set("X-CMC_PRO_API_KEY", apiKey);
             headers.set("Accept", "application/json");
             ResponseEntity<Map> response = new RestTemplate().exchange(
-                    "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC,ETH,SOL&convert=USD",
+                    "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC,ETH,SOL,BNB&convert=USD",
                     HttpMethod.GET,
                     new HttpEntity<>(headers),
                     Map.class
@@ -862,7 +862,7 @@ public class CryptoTradingService {
             Object dataObj = response.getBody() == null ? null : response.getBody().get("data");
             if (!(dataObj instanceof Map<?, ?> data)) return prices;
 
-            for (String coin : List.of("BTC", "ETH", "SOL")) {
+            for (String coin : List.of("BTC", "ETH", "SOL", "BNB")) {
                 Object coinObj = data.get(coin);
                 if (!(coinObj instanceof Map<?, ?> coinMap)) continue;
                 Object quoteObj = coinMap.get("quote");
@@ -956,7 +956,7 @@ public class CryptoTradingService {
                 + ("HIGH".equals(macroRisk) ? -20 : "MEDIUM".equals(macroRisk) ? -8 : "NORMAL".equals(macroRisk) ? 8 : 0));
 
         Map<String, Object> scores = new LinkedHashMap<>();
-        scores.put("formula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%");
+        scores.put("formula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + Macro/News 5%");
         scores.put("whaleScore", round(whaleScore));
         scores.put("onchainScore", round(onchainScore));
         scores.put("derivativesScore", round(derivativesScore));
@@ -969,11 +969,11 @@ public class CryptoTradingService {
         scores.put("sentimentDirection", sentimentScore >= 60 ? "LONG" : sentimentScore <= 42 ? "SHORT" : "NO_TRADE");
         scores.put("indicators", groupedIndicatorNames());
         scores.put("sources", Map.of(
-                "whale", "Binance large trades + volume spike + optional Arkham/Whale Alert/Glassnode/CryptoQuant",
-                "onchain", "Free proxy from CMC momentum/volume; paid Glassnode/CryptoQuant can improve this",
-                "derivatives", "Binance funding, open interest, long/short, liquidations proxy",
-                "technical", "MA/EMA/RSI/MACD/BB/ATR/VWAP/SR",
-                "sentiment", "Free RSS news + macro SPY/UUP if AlphaVantage key exists"
+                "whale", "Binance large trades + volume spike now; Arkham/Lookonchain/Whale Alert/DeBank/DexScreener manual watch; Glassnode/CryptoQuant keys improve it",
+                "onchain", "Exchange reserve, netflow, active addresses, MVRV, SOPR, NUPL, realized price and miner reserve need Glassnode/CryptoQuant keys",
+                "derivatives", "Binance funding, open interest, long/short, liquidation proxy, taker flow proxy, futures premium and basis",
+                "technical", "RSI, MACD, EMA 20/50/200, VWAP, Bollinger Bands, ATR, ADX, Supertrend",
+                "sentiment", "BTC dominance, Fear & Greed, DXY, yields, ETF flow, stablecoin market cap; news stays low-weight risk filter"
         ));
         return scores;
     }
@@ -1200,6 +1200,7 @@ public class CryptoTradingService {
         double sma200 = sma(closes, 200);
         double ema20 = ema(closes, 20);
         double ema50 = ema(closes, 50);
+        double ema200 = ema(closes, 200);
         double rsi = rsi(closes, 14);
         double std20 = std(closes, 20);
         double bbMiddle = sma(closes, 20);
@@ -1209,6 +1210,7 @@ public class CryptoTradingService {
         double ema26 = ema(closes, 26);
         double macd = ema12 - ema26;
         double atr = atr(highs, lows, closes, 14);
+        double adx = adx(highs, lows, closes, 14);
         double vwap = vwap(highs, lows, closes, volumes, Math.min(48, closes.size()));
         double support = lows.subList(Math.max(0, lows.size() - 48), lows.size()).stream().mapToDouble(Double::doubleValue).min().orElse(close);
         double resistance = highs.subList(Math.max(0, highs.size() - 48), highs.size()).stream().mapToDouble(Double::doubleValue).max().orElse(close);
@@ -1219,14 +1221,18 @@ public class CryptoTradingService {
         String bollingerPosition = close > bbUpper ? "ABOVE_UPPER"
                 : close < bbLower ? "BELOW_LOWER"
                 : close > bbMiddle ? "UPPER_HALF" : "LOWER_HALF";
+        String supertrend = close > ema20 && close > vwap && macd > 0 ? "BULLISH"
+                : close < ema20 && close < vwap && macd < 0 ? "BEARISH"
+                : "NEUTRAL";
 
         double score = 50;
         score += "BULLISH".equals(maTrend) ? 15 : "BEARISH".equals(maTrend) ? -15 : 0;
         score += rsi >= 55 && rsi <= 70 ? 8 : rsi > 75 ? -8 : rsi < 30 ? 5 : rsi < 45 ? -5 : 0;
         score += "BULLISH".equals(macdSignal) ? 8 : "BEARISH".equals(macdSignal) ? -8 : 0;
-        score += close > ema20 && ema20 > ema50 ? 8 : close < ema20 && ema20 < ema50 ? -8 : 0;
+        score += close > ema20 && ema20 > ema50 && ema50 > ema200 ? 10 : close < ema20 && ema20 < ema50 && ema50 < ema200 ? -10 : 0;
         score += close > vwap ? 5 : -5;
         score += "ABOVE_UPPER".equals(bollingerPosition) ? -3 : "BELOW_LOWER".equals(bollingerPosition) ? 3 : 0;
+        score += adx >= 25 && "BULLISH".equals(supertrend) ? 6 : adx >= 25 && "BEARISH".equals(supertrend) ? -6 : 0;
         score = Math.max(5, Math.min(95, score));
 
         Map<String, Object> value = new LinkedHashMap<>();
@@ -1237,6 +1243,7 @@ public class CryptoTradingService {
         value.put("sma200", round(sma200));
         value.put("ema20", round(ema20));
         value.put("ema50", round(ema50));
+        value.put("ema200", round(ema200));
         value.put("rsi14", round(rsi));
         value.put("bollingerUpper", round(bbUpper));
         value.put("bollingerMiddle", round(bbMiddle));
@@ -1245,6 +1252,8 @@ public class CryptoTradingService {
         value.put("macd", round(macd));
         value.put("macdSignal", macdSignal);
         value.put("atr14", round(atr));
+        value.put("adx14", round(adx));
+        value.put("supertrend", supertrend);
         value.put("vwap", round(vwap));
         value.put("support48h", round(support));
         value.put("resistance48h", round(resistance));
@@ -1260,6 +1269,8 @@ public class CryptoTradingService {
         value.put("maTrend", "WAITING");
         value.put("macdSignal", "WAITING");
         value.put("bollingerPosition", "WAITING");
+        value.put("adx14", 0);
+        value.put("supertrend", "WAITING");
         value.put("source", "INDICATOR_FALLBACK");
         return value;
     }
@@ -1312,6 +1323,25 @@ public class CryptoTradingService {
             ranges.add(Math.max(highLow, Math.max(highClose, lowClose)));
         }
         return ranges.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+    }
+
+    private double adx(List<Double> highs, List<Double> lows, List<Double> closes, int period) {
+        if (closes.size() <= period + 1) return 0;
+        List<Double> dxValues = new ArrayList<>();
+        for (int i = Math.max(1, closes.size() - period); i < closes.size(); i++) {
+            double upMove = highs.get(i) - highs.get(i - 1);
+            double downMove = lows.get(i - 1) - lows.get(i);
+            double plusDm = upMove > downMove && upMove > 0 ? upMove : 0;
+            double minusDm = downMove > upMove && downMove > 0 ? downMove : 0;
+            double trueRange = Math.max(highs.get(i) - lows.get(i),
+                    Math.max(Math.abs(highs.get(i) - closes.get(i - 1)), Math.abs(lows.get(i) - closes.get(i - 1))));
+            if (trueRange <= 0) continue;
+            double plusDi = 100 * plusDm / trueRange;
+            double minusDi = 100 * minusDm / trueRange;
+            double denominator = plusDi + minusDi;
+            if (denominator > 0) dxValues.add(100 * Math.abs(plusDi - minusDi) / denominator);
+        }
+        return dxValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
     }
 
     private double vwap(List<Double> highs, List<Double> lows, List<Double> closes, List<Double> volumes, int period) {
@@ -1396,14 +1426,15 @@ public class CryptoTradingService {
         payload.put("volumeScore", volumeScore);
         payload.put("newsRisk", newsRisk);
         payload.put("liquidationRisk", liquidationRisk);
-        payload.put("finalScoreFormula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + News/Sentiment 5%");
+        payload.put("finalScoreFormula", "Whale 30% + On-chain 25% + Derivatives 25% + Technical 15% + Macro/News 5%");
         payload.put("rules", List.of(
                 "Return only LONG, SHORT, or NO_TRADE.",
-                "Prefer NO_TRADE when futures/whale/news risk conflicts with indicators.",
-                "Auto trade only when whale, derivatives and technical direction agree.",
+                "News is low-weight risk filter only; do not force trades from headlines.",
+                "Prefer NO_TRADE when whale/on-chain, derivatives or technicals conflict.",
+                "Auto trade only when whale/on-chain, derivatives and technical direction agree.",
                 "80+ score means strong, 70-79 watchlist, 60-69 weak, below 60 no trade.",
                 "For LONG, S&P500/SPY must not be risk-off and dollar/DXY proxy must not be strongly up.",
-                "Use verified news, ETF proxy and whale/exchange-flow context before giving trade probability.",
+                "Use ETF proxy, stablecoin/macro proxy and whale/exchange-flow context before giving trade probability.",
                 "Do not trade during high liquidation/news risk.",
                 "Give probabilities that add to 100."
         ));

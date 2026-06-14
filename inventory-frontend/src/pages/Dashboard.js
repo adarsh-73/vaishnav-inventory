@@ -8,7 +8,7 @@ function Dashboard() {
   const [products, setProducts] = useState([]);
   const [dailyBook, setDailyBook] = useState([]);
   const [invoices, setInvoices] = useState([]);
-  const [showWashingBreakdown, setShowWashingBreakdown] = useState(false);
+  const [activeBreakdown, setActiveBreakdown] = useState("");
 
   const load = async () => {
     try {
@@ -63,8 +63,10 @@ function Dashboard() {
   const goToUdhar = () => navigate("/old-bills?udhar=1");
   const recentInvoices = report.invoices.slice().reverse().slice(0, 6);
   const recentEntries = report.dailyBook.slice().reverse().slice(0, 6);
-  const washingRows = useMemo(() => getWashingBreakdownRows(report), [report]);
-  const washingDailyTotals = useMemo(() => getDailyTotals(washingRows), [washingRows]);
+  const breakdownConfig = getBreakdownConfig(activeBreakdown);
+  const breakdownRows = useMemo(() => getDashboardBreakdownRows(activeBreakdown, report, products), [activeBreakdown, products, report]);
+  const breakdownDailyTotals = useMemo(() => getDailyTotals(breakdownRows), [breakdownRows]);
+  const openBreakdown = (key) => setActiveBreakdown((current) => current === key ? "" : key);
 
   return (
     <div style={pageStyle}>
@@ -98,28 +100,28 @@ function Dashboard() {
       )}
 
       <div style={cardGrid}>
-        <MetricCard label="Washing / Labour Profit" value={formatMoney(washingProfit)} accent="#0f766e" onClick={() => setShowWashingBreakdown((value) => !value)} />
-        <MetricCard label="Accessories Sale" value={formatMoney(totals.accessories)} accent="#0f2963" />
-        <MetricCard label="Accessories Profit" value={formatMoney(totals.accessoriesProfit)} accent="#15803d" />
-        <MetricCard label="Gross Profit" value={formatMoney(grossProfit)} accent="#166534" />
-        <MetricCard label="Net Profit" value={formatMoney(netProfit)} accent="#0f5132" />
-        <MetricCard label="This Month Billing" value={formatMoney(invoiceTotal)} accent="#9c742a" />
-        <MetricCard label="Stock Value" value={formatMoney(stockValue)} accent="#334155" />
-        <MetricCard label="Total Products" value={products.length} accent="#475569" />
+        <MetricCard label="Washing / Labour Profit" value={formatMoney(washingProfit)} accent="#0f766e" onClick={() => openBreakdown("washing")} />
+        <MetricCard label="Accessories Sale" value={formatMoney(totals.accessories)} accent="#0f2963" onClick={() => openBreakdown("accessoriesSale")} />
+        <MetricCard label="Accessories Profit" value={formatMoney(totals.accessoriesProfit)} accent="#15803d" onClick={() => openBreakdown("accessoriesProfit")} />
+        <MetricCard label="Gross Profit" value={formatMoney(grossProfit)} accent="#166534" onClick={() => openBreakdown("grossProfit")} />
+        <MetricCard label="Net Profit" value={formatMoney(netProfit)} accent="#0f5132" onClick={() => openBreakdown("netProfit")} />
+        <MetricCard label="This Month Billing" value={formatMoney(invoiceTotal)} accent="#9c742a" onClick={() => openBreakdown("billing")} />
+        <MetricCard label="Stock Value" value={formatMoney(stockValue)} accent="#334155" onClick={() => openBreakdown("stockValue")} />
+        <MetricCard label="Total Products" value={products.length} accent="#475569" onClick={() => navigate("/products")} />
         <MetricCard label="Low Stock" value={lowStockProducts.length} accent="#c2410c" onClick={() => goToLowStock()} />
         <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={goToUdhar} />
-        <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" />
+        <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => openBreakdown("expense")} />
       </div>
 
-      {showWashingBreakdown && (
+      {activeBreakdown && (
         <section style={widePanelStyle}>
           <div style={panelHeader}>
-            <h2 style={panelTitle}>Washing / Labour Daily Breakdown</h2>
-            <button type="button" onClick={() => setShowWashingBreakdown(false)} style={refreshBtn}>Close</button>
+            <h2 style={panelTitle}>{breakdownConfig.title}</h2>
+            <button type="button" onClick={() => setActiveBreakdown("")} style={refreshBtn}>Close</button>
           </div>
           <div style={breakdownGrid}>
             <div style={miniPanel}>
-              <h3 style={miniTitle}>Daily Total</h3>
+              <h3 style={miniTitle}>{breakdownConfig.totalTitle}</h3>
               <table style={tableStyle}>
                 <thead>
                   <tr>
@@ -129,14 +131,14 @@ function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {washingDailyTotals.map((row) => (
+                  {breakdownDailyTotals.map((row) => (
                     <tr key={row.date}>
                       <td style={tdStyle}>{row.date}</td>
                       <td style={tdStyle}>{row.count}</td>
                       <td style={amountTd}>{formatMoney(row.amount)}</td>
                     </tr>
                   ))}
-                  {washingDailyTotals.length === 0 && <tr><td style={emptyTd} colSpan="3">No washing/labour entries</td></tr>}
+                  {breakdownDailyTotals.length === 0 && <tr><td style={emptyTd} colSpan="3">No entries</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -154,10 +156,10 @@ function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {washingRows.map((row) => (
+                    {breakdownRows.map((row) => (
                       <tr
                         key={row.id}
-                        onClick={() => row.invoiceId ? navigate(`/billing?invoiceId=${row.invoiceId}`) : navigate("/daily-book")}
+                        onClick={() => row.invoiceId ? navigate(`/billing?invoiceId=${row.invoiceId}`) : row.productId ? navigate(`/products?productId=${row.productId}&q=${encodeURIComponent(row.party || "")}`) : navigate(row.target || "/daily-book")}
                         style={clickableRow}
                       >
                         <td style={tdStyle}>{row.date}</td>
@@ -167,7 +169,7 @@ function Dashboard() {
                         <td style={amountTd}>{formatMoney(row.amount)}</td>
                       </tr>
                     ))}
-                    {washingRows.length === 0 && <tr><td style={emptyTd} colSpan="5">No washing/labour entries</td></tr>}
+                    {breakdownRows.length === 0 && <tr><td style={emptyTd} colSpan="5">No entries</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -301,13 +303,56 @@ function formatDate(value) {
   return String(value || "").slice(0, 10) || "-";
 }
 
-function getWashingBreakdownRows(report) {
-  const invoiceNumberSet = new Set(
+function getBreakdownConfig(type) {
+  const configs = {
+    washing: { title: "Washing / Labour Breakdown", totalTitle: "Daily Total" },
+    accessoriesSale: { title: "Accessories Sale Breakdown", totalTitle: "Daily Sale" },
+    accessoriesProfit: { title: "Accessories Profit Breakdown", totalTitle: "Daily Profit" },
+    grossProfit: { title: "Gross Profit Breakdown", totalTitle: "Daily Gross Profit" },
+    netProfit: { title: "Net Profit Breakdown", totalTitle: "Daily Net Profit" },
+    billing: { title: "This Month Billing Breakdown", totalTitle: "Daily Billing" },
+    stockValue: { title: "Stock Value Breakdown", totalTitle: "Stock By Date" },
+    expense: { title: "Paid Daily Expense Breakdown", totalTitle: "Daily Expense" }
+  };
+  return configs[type] || { title: "Dashboard Breakdown", totalTitle: "Daily Total" };
+}
+
+function getDashboardBreakdownRows(type, report, products) {
+  if (!type) return [];
+  if (type === "washing") return getWashingBreakdownRows(report);
+  if (type === "accessoriesSale") return getAccessoriesRows(report, "sale");
+  if (type === "accessoriesProfit") return getAccessoriesRows(report, "profit");
+  if (type === "grossProfit") return [...getWashingBreakdownRows(report), ...getAccessoriesRows(report, "profit")].sort(sortRowsByDateDesc);
+  if (type === "netProfit") {
+    return [
+      ...getWashingBreakdownRows(report),
+      ...getAccessoriesRows(report, "profit"),
+      ...getExpenseRows(report).map((row) => ({ ...row, amount: -Math.abs(row.amount), source: "Expense" }))
+    ].sort(sortRowsByDateDesc);
+  }
+  if (type === "billing") return getBillingRows(report);
+  if (type === "stockValue") return getStockRows(products, true);
+  if (type === "expense") return getExpenseRows(report);
+  return [];
+}
+
+function invoiceNumberSet(report) {
+  return new Set(
     (report.invoices || [])
       .map((invoice) => invoice.invoiceNumber)
       .filter(Boolean)
       .map((invoiceNumber) => String(invoiceNumber).trim().toLowerCase())
   );
+}
+
+function isInvoiceMirrorEntry(entry, invoiceNumbers) {
+  const note = String(entry.note || "").toLowerCase();
+  const isInvoiceEntry = note.includes("invoice ");
+  return isInvoiceEntry && Array.from(invoiceNumbers).some((invoiceNumber) => note.includes(invoiceNumber));
+}
+
+function getWashingBreakdownRows(report) {
+  const invoiceNumbers = invoiceNumberSet(report);
   const invoiceRows = (report.invoices || [])
     .map((invoice) => {
       const split = getInvoiceCategoryTotals(invoice);
@@ -332,7 +377,7 @@ function getWashingBreakdownRows(report) {
     .filter((entry) => {
       const note = String(entry.note || "").toLowerCase();
       const isInvoiceEntry = note.includes("invoice ");
-      const isInvoiceMirror = isInvoiceEntry && Array.from(invoiceNumberSet).some((invoiceNumber) => note.includes(invoiceNumber));
+      const isInvoiceMirror = isInvoiceMirrorEntry(entry, invoiceNumbers);
       return entry.entryType === "income" && entry.paymentStatus !== "udhar" && !isInvoiceMirror && !isInvoiceEntry && isWashingEntry(entry);
     })
     .map((entry) => ({
@@ -345,6 +390,94 @@ function getWashingBreakdownRows(report) {
     }));
 
   return [...invoiceRows, ...dailyRows].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function getAccessoriesRows(report, mode) {
+  const invoiceNumbers = invoiceNumberSet(report);
+  const invoiceRows = (report.invoices || [])
+    .map((invoice) => {
+      const split = getInvoiceCategoryTotals(invoice);
+      const amount = mode === "profit" ? Number(split.accessoriesProfit || 0) : Number(split.accessories || 0);
+      if (amount <= 0) return null;
+      const items = (invoice.invoiceItems || invoice.items || [])
+        .filter((item) => getInvoiceCategoryTotals({ invoiceItems: [item] }).accessories > 0)
+        .map((item) => item.description || item.productInvoiceitem?.productName || item.productName)
+        .filter(Boolean)
+        .join(", ");
+      return {
+        id: `accessories-${mode}-${invoice.id}`,
+        invoiceId: invoice.id,
+        date: formatDate(invoice.invoiceDate || invoice.createdDate),
+        source: `Bill ${invoice.invoiceNumber || invoice.id}`,
+        party: invoice.customer?.customerName || "Walk-in",
+        note: items || "Accessories",
+        amount
+      };
+    })
+    .filter(Boolean);
+
+  const dailyRows = (report.dailyBook || [])
+    .filter((entry) => {
+      const note = String(entry.note || "").toLowerCase();
+      const isInvoiceEntry = note.includes("invoice ");
+      return entry.entryType === "income" && entry.paymentStatus !== "udhar" && !isWashingEntry(entry) && !isInvoiceEntry && !isInvoiceMirrorEntry(entry, invoiceNumbers);
+    })
+    .map((entry) => ({
+      id: `daily-accessories-${mode}-${entry.id}`,
+      date: formatDate(entry.entryDate || entry.createdDate),
+      source: "Daily Book",
+      party: entry.partyName || "-",
+      note: entry.note || entry.incomeCategory || "Accessories",
+      amount: Number(entry.amount || 0)
+    }));
+
+  return [...invoiceRows, ...dailyRows].sort(sortRowsByDateDesc);
+}
+
+function getBillingRows(report) {
+  return (report.invoices || [])
+    .map((invoice) => ({
+      id: `billing-${invoice.id}`,
+      invoiceId: invoice.id,
+      date: formatDate(invoice.invoiceDate || invoice.createdDate),
+      source: `Bill ${invoice.invoiceNumber || invoice.id}`,
+      party: invoice.customer?.customerName || "Walk-in",
+      note: formatInvoiceCategory(invoice),
+      amount: Number(invoice.totalAmount || 0)
+    }))
+    .sort(sortRowsByDateDesc);
+}
+
+function getExpenseRows(report) {
+  return (report.dailyBook || [])
+    .filter((entry) => entry.entryType === "expense")
+    .map((entry) => ({
+      id: `expense-${entry.id}`,
+      date: formatDate(entry.entryDate || entry.createdDate),
+      source: "Daily Book",
+      party: entry.partyName || "-",
+      note: entry.note || "Expense",
+      amount: Number(entry.amount || 0)
+    }))
+    .sort(sortRowsByDateDesc);
+}
+
+function getStockRows(products, useValue) {
+  return (products || [])
+    .map((product) => ({
+      id: `product-${useValue ? "value" : "count"}-${product.id}`,
+      productId: product.id,
+      date: formatDate(product.createdDate || product.updatedDate),
+      source: useValue ? "Stock Value" : "Product",
+      party: product.productName || "-",
+      note: `Qty ${product.quantity || 0} | Buy ${formatMoney(product.purchasePrice || 0)} | Sell ${formatMoney(product.sellPrice || 0)}`,
+      amount: useValue ? Number(product.quantity || 0) * Number(product.sellPrice || 0) : Number(product.quantity || 0)
+    }))
+    .sort(sortRowsByDateDesc);
+}
+
+function sortRowsByDateDesc(a, b) {
+  return new Date(b.date || 0) - new Date(a.date || 0);
 }
 
 function getDailyTotals(rows) {
