@@ -219,12 +219,13 @@ function CryptoTrading() {
           <span style={pillStyle}>A to Z decision flow</span>
         </div>
         <div style={strategyGrid}>
-          <Info label="Price" value="CoinMarketCap live BTC/ETH/SOL/BNB" />
-          <Info label="Indicators" value="RSI, MACD, EMA 20/50/200, VWAP, BB, ATR, ADX, Supertrend" />
-          <Info label="Derivatives" value="OI, OI change, funding, long/short, liquidation, taker flow, basis" />
-          <Info label="Whale / On-chain" value="Exchange reserve, netflow, whale buy/sell, stablecoin and smart-money flow" />
-          <Info label="Macro" value="DXY, US yields, S&P500, ETF flow, Fear & Greed, stablecoin market cap" />
-          <Info label="Entry Rule" value="75%+ score, 2+ timeframes, RR 1:2+, no high risk" />
+          <Info label="Price" value="Binance live BTC/ETH/SOL/BNB" />
+          <Info label="Indicators" value="60+ calculated OHLCV values on 15m/1h/4h" />
+          <Info label="Derivatives" value="Binance OI history, funding, long/short, taker flow" />
+          <Info label="Liquidations" value="Binance force-order WebSocket (live after backend starts)" />
+          <Info label="Large traders" value="Binance aggregate-trade proxy; not claimed as on-chain whale data" />
+          <Info label="AI" value="OpenAI/Gemini/DeepSeek only when their server keys are configured" />
+          <Info label="Entry Rule" value="Aligned timeframes + derivatives + configured AI + safety; paper-only" />
         </div>
       </section>
 
@@ -357,6 +358,12 @@ function CryptoTrading() {
             <Info label="Position Size" value={`${selectedPlan.positionSize.toFixed(4)} ${selectedPlan.symbol}`} />
             <Info label="Risk Amount" value={formatUsd(selectedPlan.riskAmount)} danger />
             <Info label="Signal Grade" value={selectedPlan.signalGrade || "WAIT"} strong />
+            <Info label="OI Change" value={formatPercent(selectedPlan.futuresData?.openInterestChangePercent)} />
+            <Info label="Funding" value={Number(selectedPlan.futuresData?.fundingRate || 0).toFixed(6)} />
+            <Info label="Long / Short" value={Number(selectedPlan.futuresData?.longShortRatio || 0).toFixed(3)} />
+            <Info label="Taker Buy/Sell" value={Number(selectedPlan.futuresData?.takerBuySellRatio || 0).toFixed(3)} />
+            <Info label="Large Trade Bias" value={selectedPlan.whaleData?.bias || "NO DATA"} />
+            <Info label="Liquidations 1h" value={`${selectedPlan.liquidationData?.eventCount || 0} live events`} />
             <Info label="Category Align" value={selectedPlan.categoryAligned ? "YES" : "NO"} good={selectedPlan.categoryAligned} danger={!selectedPlan.categoryAligned} />
             <Info label="Whale 30%" value={`${scoreValue(selectedPlan.categoryScores?.whaleScore)} ${selectedPlan.categoryScores?.whaleDirection || ""}`} />
             <Info label="On-chain 25%" value={`${scoreValue(selectedPlan.categoryScores?.onchainScore)} ${selectedPlan.categoryScores?.onchainDirection || ""}`} />
@@ -635,7 +642,7 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
       exit: vote.reason || vote.entryQuality || "-"
     }));
     const longVotes = aiVotes.filter((vote) => vote.signal === "LONG").length;
-    const shortVotes = aiVotes.length - longVotes;
+    const shortVotes = aiVotes.filter((vote) => vote.signal === "SHORT").length;
     const timeframeRows = {};
     (signal.timeframes || []).forEach((row) => {
       timeframeRows[row.timeframe] = {
@@ -644,7 +651,8 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
         ma100: row.ma100,
         ma200: row.ma200,
         rsi: row.rsi,
-        score: Math.round(Number(signal.finalScore || fallbackPlan.confidence))
+        score: Math.round(Number(signal.finalScore || fallbackPlan.confidence)),
+        indicators: row.indicators || {}
       };
     });
     plans[symbol] = {
@@ -664,7 +672,10 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
       categoryScores: signal.categoryScores || fallbackPlan.categoryScores,
       aiReason: signal.aiDecision?.reason || "",
       aiSource: signal.aiDecision?.source || "",
-      indicators: signal.technicalIndicators || {},
+      indicators: signal.timeframes?.[0]?.indicators || signal.technicalIndicators || {},
+      futuresData: signal.futuresData || {},
+      liquidationData: signal.liquidationData || {},
+      whaleData: signal.whaleData || {},
       percentChange1h: Number(signal.percentChange1h || 0),
       percentChange24h: Number(signal.percentChange24h || 0),
       percentChange7d: Number(signal.percentChange7d || 0),
@@ -687,7 +698,7 @@ function normalizeServerDashboard(serverDashboard, fallback, capital) {
         { name: "Backend consensus + risk engine", pass: Boolean(signal.allowed) },
         { name: signal.blockReason || "No block reason", pass: !signal.blockReason },
         { name: "Real money disabled, paper-only mode", pass: true },
-        { name: "100 indicator clean summary available", pass: true }
+        { name: `${Number(signal.indicatorSummary?.perTimeframe || 0)} real values per timeframe`, pass: Number(signal.indicatorSummary?.perTimeframe || 0) >= 50 }
       ],
       paper: fallbackPlan.paper
     };
@@ -737,7 +748,7 @@ function buildPlan(symbol, settings) {
   }));
   const direction = "NO_TRADE";
   const confidence = 0;
-  const entry = market.price;
+  const entry = 0;
   const stopDistance = 0;
   const stopLoss = entry - stopDistance;
   const takeProfit = entry + stopDistance * 2;
@@ -751,7 +762,7 @@ function buildPlan(symbol, settings) {
     { name: "Fake local signal disabled", pass: true }
   ];
   const allowed = false;
-  const paper = buildPaperStats(symbol, confidence, direction, allowed, settings.capital);
+  const paper = buildPaperStats();
 
   return {
     symbol,
@@ -804,22 +815,16 @@ function buildPlan(symbol, settings) {
 function buildWaitingTimeframe(market) {
   return {
     signal: "NO_TRADE",
-    ma50: market.price,
-    ma100: market.price,
-    ma200: market.price,
-    rsi: 50,
+    ma50: 0,
+    ma100: 0,
+    ma200: 0,
+    rsi: 0,
     score: 0
   };
 }
 
-function buildPaperStats(symbol, confidence, direction, allowed, capital) {
-  const base = MARKETS[symbol].seed + confidence + (direction === "LONG" ? 9 : -7);
-  const trades = 22 + (base % 17);
-  const winRate = allowed ? 54 + (base % 18) : 42 + (base % 9);
-  const pnlPercent = allowed ? (winRate - 50) / 5 : -1.2;
-  const pnl = Number(capital || 0) * pnlPercent / 100;
-  const drawdown = allowed ? 3 + (base % 6) : 8 + (base % 5);
-  return { trades, winRate, pnl, drawdown };
+function buildPaperStats() {
+  return { trades: 0, winRate: 0, pnl: 0, drawdown: 0 };
 }
 
 function formatPrice(value) {

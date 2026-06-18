@@ -26,6 +26,12 @@ public class CryptoTradingService {
     @Autowired
     private CryptoIndicatorService indicatorService;
 
+    @Autowired
+    private CryptoLiquidationStreamService liquidationStreamService;
+
+    @Autowired
+    private CryptoAiConsensusService aiConsensusService;
+
     public Map<String, Object> getDashboard() {
         Map<String, Object> response = new LinkedHashMap<>();
         List<Map<String, Object>> signals = new ArrayList<>();
@@ -41,6 +47,8 @@ public class CryptoTradingService {
         response.put("realMoneyEnabled", false);
         response.put("cashMode", "DISABLED");
         response.put("maxDailyTrades", MAX_DAILY_PAPER_TRADES);
+        response.put("fearGreed", marketDataService.getFearGreed());
+        response.put("dataPolicy", "No simulated market values. Missing providers return NOT_CONFIGURED or UNAVAILABLE.");
         response.put("symbols", signals);
         response.put("report", buildReport(trades));
         response.put("openTrades", paperTradeRepository.findByStatus("RUNNING"));
@@ -88,7 +96,7 @@ public class CryptoTradingService {
             trade.setConfidence(toDouble(signal.get("confidence")));
             trade.setFinalScore(toDouble(signal.get("finalScore")));
             trade.setRiskReward(toDouble(signal.get("riskReward")));
-            trade.setBestAi("Indicator Engine");
+            trade.setBestAi(String.valueOf(signal.get("bestAi")));
             trade.setAiConsensus(String.valueOf(signal.get("aiConsensus")));
             trade.setTechnicalSummary(String.valueOf(signal.get("technicalSummary")));
             trade.setNewsRisk(String.valueOf(signal.get("newsRisk")));
@@ -154,6 +162,7 @@ public class CryptoTradingService {
             Map<String, Object> a4h =
                     indicatorService.analyze(marketDataService.getCandles(symbol, "4h", 200));
             CryptoMarketDataService.FuturesStats futures = marketDataService.getFuturesStats(symbol);
+            Map<String, Object> liquidations = liquidationStreamService.snapshot(symbol);
 
             int longCount = 0;
             int shortCount = 0;
@@ -168,7 +177,8 @@ public class CryptoTradingService {
                     (toDouble(a15.get("score")) + toDouble(a1h.get("score")) + toDouble(a4h.get("score"))) / 3.0
             );
 
-            double atr = Math.max(toDouble(a15.get("atr14")), getAtr(symbol) * 0.25);
+            double atr = toDouble(a15.get("atr14"));
+            if (atr <= 0) atr = livePrice * 0.01;
             double stopDistance = atr * 0.82;
             double riskReward = 2.0;
 
@@ -187,15 +197,41 @@ public class CryptoTradingService {
             boolean aligned = longCount == 3 || shortCount == 3;
             boolean fundingRisk = Math.abs(futures.fundingRate) >= 0.001;
             boolean futuresAvailable = futures.openInterest > 0 || futures.markPrice > 0;
-            boolean allowed = aligned && avgScore >= 65 && futuresAvailable && !fundingRisk;
+            int derivativesScore = derivativesScore(finalSignal, futures);
+            boolean derivativesAligned = derivativesScore >= 55;
+
+            Map<String, Object> aiSnapshot = new LinkedHashMap<>();
+            aiSnapshot.put("technicalSignal", finalSignal);
+            aiSnapshot.put("technicalScore", avgScore);
+            aiSnapshot.put("timeframeSignals", List.of(a15.get("signal"), a1h.get("signal"), a4h.get("signal")));
+            aiSnapshot.put("rsi15m", a15.get("rsi14"));
+            aiSnapshot.put("macd15m", a15.get("macdHistogram"));
+            aiSnapshot.put("adx15m", a15.get("adx14"));
+            aiSnapshot.put("atr15m", a15.get("atr14"));
+            aiSnapshot.put("openInterestChangePercent", futures.openInterestChangePercent);
+            aiSnapshot.put("fundingRate", futures.fundingRate);
+            aiSnapshot.put("longShortRatio", futures.longShortRatio);
+            aiSnapshot.put("takerBuySellRatio", futures.takerBuySellRatio);
+            aiSnapshot.put("largeTradeBias", futures.largeTradeBias);
+            aiSnapshot.put("liquidations", liquidations);
+            Map<String, Object> aiConsensus = aiConsensusService.analyze(symbol, aiSnapshot);
+            int aiProviderCount = (int) toDouble(aiConsensus.get("configuredProviders"));
+            String aiSignal = String.valueOf(aiConsensus.get("signal"));
+            boolean aiAligned = aiProviderCount == 0 || finalSignal.equals(aiSignal);
+            int aiConfidence = (int) toDouble(aiConsensus.get("confidence"));
+
+            int finalScore = aiProviderCount > 0
+                    ? (int) Math.round(avgScore * 0.65 + derivativesScore * 0.20 + aiConfidence * 0.15)
+                    : (int) Math.round(avgScore * 0.75 + derivativesScore * 0.25);
+            boolean allowed = aligned && finalScore >= 65 && futuresAvailable && derivativesAligned && aiAligned && !fundingRisk;
 
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("symbol", symbol);
             map.put("finalSignal", allowed ? finalSignal : "NO_TRADE");
             map.put("rawSignal", finalSignal);
             map.put("allowed", allowed);
-            map.put("confidence", avgScore);
-            map.put("finalScore", avgScore);
+            map.put("confidence", finalScore);
+            map.put("finalScore", finalScore);
             map.put("entry", livePrice);
             map.put("currentPrice", livePrice);
             map.put("priceSource", "BINANCE_REAL");
@@ -205,14 +241,38 @@ public class CryptoTradingService {
             map.put("trailingStop", trailingStop);
             map.put("riskReward", riskReward);
             map.put("positionSize", 1000 / livePrice);
-            map.put("futuresData", Map.of(
-                    "openInterest", futures.openInterest,
-                    "fundingRate", futures.fundingRate,
-                    "markPrice", futures.markPrice,
-                    "indexPrice", futures.indexPrice,
-                    "priceChangePercent24h", futures.priceChangePercent24h,
-                    "quoteVolume24h", futures.quoteVolume24h,
-                    "source", "BINANCE_FUTURES_REAL"
+            Map<String, Object> futuresData = new LinkedHashMap<>();
+            futuresData.put("openInterest", futures.openInterest);
+            futuresData.put("openInterestValue", futures.openInterestValue);
+            futuresData.put("openInterestChangePercent", futures.openInterestChangePercent);
+            futuresData.put("fundingRate", futures.fundingRate);
+            futuresData.put("nextFundingTime", futures.nextFundingTime);
+            futuresData.put("markPrice", futures.markPrice);
+            futuresData.put("indexPrice", futures.indexPrice);
+            futuresData.put("priceChangePercent24h", futures.priceChangePercent24h);
+            futuresData.put("quoteVolume24h", futures.quoteVolume24h);
+            futuresData.put("longShortRatio", futures.longShortRatio);
+            futuresData.put("longAccount", futures.longAccount);
+            futuresData.put("shortAccount", futures.shortAccount);
+            futuresData.put("takerBuySellRatio", futures.takerBuySellRatio);
+            futuresData.put("largeBuyNotional", futures.largeBuyNotional);
+            futuresData.put("largeSellNotional", futures.largeSellNotional);
+            futuresData.put("largeTradeCount", futures.largeTradeCount);
+            futuresData.put("largeTradeThreshold", futures.largeTradeThreshold);
+            futuresData.put("largeTradeBias", futures.largeTradeBias);
+            futuresData.put("derivativesScore", derivativesScore);
+            futuresData.put("fetchedAt", futures.fetchedAt);
+            futuresData.put("source", "BINANCE_FUTURES_REAL");
+            map.put("futuresData", futuresData);
+            map.put("liquidationData", liquidations);
+            map.put("whaleData", Map.of(
+                    "type", "EXCHANGE_LARGE_TRADE_PROXY",
+                    "status", futures.largeTradeCount > 0 ? "LIVE" : "NO_LARGE_TRADES_IN_SAMPLE",
+                    "buyNotional", futures.largeBuyNotional,
+                    "sellNotional", futures.largeSellNotional,
+                    "bias", futures.largeTradeBias,
+                    "source", "BINANCE_AGG_TRADES_REAL",
+                    "onChain", false
             ));
 
             map.put("timeframes", List.of(
@@ -221,15 +281,12 @@ public class CryptoTradingService {
                     timeframeRow("4h", a4h)
             ));
 
-            map.put("aiVotes", List.of(
-                    Map.of("ai", "Indicator Engine", "signal", finalSignal, "confidence", avgScore, "reason", "Real Binance candles"),
-                    Map.of("ai", "Risk AI", "signal", allowed ? finalSignal : "NO_TRADE", "confidence", avgScore, "reason", "Risk filter checked")
-            ));
-
-            map.put("aiConsensus", "LONG=" + longCount + "/3 SHORT=" + shortCount + "/3");
-            map.put("bestAi", "Indicator Engine");
+            map.put("aiVotes", aiConsensus.get("votes"));
+            map.put("aiConsensus", aiConsensus);
+            map.put("bestAi", aiProviderCount > 0 ? "Provider Consensus" : "Indicator Engine (LLM keys not configured)");
             map.put("indicatorSummary", Map.of(
-                    "total", 36,
+                    "total", Math.round(toDouble(a15.get("indicatorCount")) + toDouble(a1h.get("indicatorCount")) + toDouble(a4h.get("indicatorCount"))),
+                    "perTimeframe", a15.get("indicatorCount"),
                     "bullish", Math.round(
                             toDouble(a15.get("bullish")) + toDouble(a1h.get("bullish")) + toDouble(a4h.get("bullish"))
                     ),
@@ -237,9 +294,9 @@ public class CryptoTradingService {
                             toDouble(a15.get("bearish")) + toDouble(a1h.get("bearish")) + toDouble(a4h.get("bearish"))
                     )
             ));
-            map.put("technicalSummary", "Real Binance candles checked: SMA20/50/200, EMA20/50/200, RSI14, MACD, Bollinger Bands, ATR14, VWAP on 15m/1h/4h. Futures checked: open interest, funding, mark price, 24h futures volume.");
+            map.put("technicalSummary", "60+ real values per timeframe calculated from Binance OHLCV: SMA/EMA families, RSI, MACD, Bollinger, ATR, VWAP, ROC, momentum, Donchian, Williams %R, CCI, MFI, OBV, CMF, stochastic, DMI/ADX and volume flow. Futures: OI history, funding, long/short, taker flow and large trades.");
             map.put("newsRisk", fundingRisk ? "FUNDING_RISK" : "NORMAL");
-            map.put("blockReason", allowed ? "" : !futuresAvailable ? "Binance futures data unavailable" : fundingRisk ? "Funding rate too risky" : "Timeframes not aligned or score below 65");
+            map.put("blockReason", allowed ? "" : !futuresAvailable ? "Binance futures data unavailable" : fundingRisk ? "Funding rate too risky" : !aiAligned ? "Configured AI providers disagree with technical direction" : !derivativesAligned ? "Derivatives flow does not confirm direction" : "Timeframes not aligned or final score below 65");
 
             return map;
 
@@ -288,17 +345,21 @@ public class CryptoTradingService {
         row.put("bollingerPosition", analysis.get("bollingerPosition"));
         row.put("atr14", analysis.get("atr14"));
         row.put("vwap", analysis.get("vwap"));
+        row.put("adx14", analysis.get("adx14"));
+        row.put("indicatorCount", analysis.get("indicatorCount"));
+        row.put("indicators", analysis.get("indicators"));
         return row;
     }
 
-    private double getAtr(String symbol) {
-        return switch (symbol) {
-            case "BTCUSDT" -> 1850.0;
-            case "ETHUSDT" -> 112.0;
-            case "SOLUSDT" -> 7.8;
-            case "BNBUSDT" -> 18.0;
-            default -> 10.0;
-        };
+    private int derivativesScore(String signal, CryptoMarketDataService.FuturesStats futures) {
+        int score = 50;
+        boolean isLong = "LONG".equals(signal);
+        if (futures.openInterestChangePercent > 0) score += 8;
+        if ((futures.takerBuySellRatio >= 1 && isLong) || (futures.takerBuySellRatio > 0 && futures.takerBuySellRatio < 1 && !isLong)) score += 12; else score -= 8;
+        if (("BUY".equals(futures.largeTradeBias) && isLong) || ("SELL".equals(futures.largeTradeBias) && !isLong)) score += 12; else if (!"NEUTRAL".equals(futures.largeTradeBias)) score -= 8;
+        if ((futures.priceChangePercent24h >= 0 && isLong) || (futures.priceChangePercent24h < 0 && !isLong)) score += 8; else score -= 5;
+        if (Math.abs(futures.fundingRate) >= 0.001) score -= 25;
+        return Math.max(0, Math.min(100, score));
     }
 
     private Map<String, Object> buildReport(List<CryptoPaperTrade> trades) {
