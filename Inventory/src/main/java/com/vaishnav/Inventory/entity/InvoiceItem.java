@@ -23,6 +23,12 @@ public class InvoiceItem {
 
     private String itemCategory;
 
+    private Boolean autoCreateProduct;
+
+    private Double purchasePrice;
+
+    private String stockCategory;
+
     private Integer quantity;
 
     private Integer returnedQuantity;

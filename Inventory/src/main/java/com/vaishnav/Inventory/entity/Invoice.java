@@ -23,6 +23,10 @@ public class Invoice {
 
     private Double totalAmount;
 
+    private Double discountAmount;
+
+    private String discountNote;
+
     private Double paidAmount;
 
     private Double remainingAmount;

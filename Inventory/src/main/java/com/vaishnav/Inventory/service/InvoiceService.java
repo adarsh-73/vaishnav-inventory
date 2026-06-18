@@ -65,6 +65,8 @@ public class InvoiceService {
         existing.setPaymentMethod(invoice.getPaymentMethod());
         existing.setBusinessCategory(invoice.getBusinessCategory());
         existing.setTotalAmount(invoice.getTotalAmount());
+        existing.setDiscountAmount(invoice.getDiscountAmount());
+        existing.setDiscountNote(invoice.getDiscountNote());
         existing.setCustomer(resolveCustomer(invoice.getCustomer()));
         if (existing.getInvoiceItems() == null) {
             existing.setInvoiceItems(new java.util.ArrayList<>());
@@ -202,21 +204,25 @@ public class InvoiceService {
 
     private Invoice saveInvoice(Invoice invoice, Long updatingId) {
 
-        double totalAmount = invoice.getTotalAmount() != null ? invoice.getTotalAmount() : 0;
+        double subtotalAmount = invoice.getTotalAmount() != null ? invoice.getTotalAmount() : 0;
 
         invoice.setCustomer(resolveCustomer(invoice.getCustomer()));
 
         if (invoice.getInvoiceItems() != null && !invoice.getInvoiceItems().isEmpty()) {
-            totalAmount = 0;
+            subtotalAmount = 0;
         }
 
         if (invoice.getInvoiceItems() != null) for (InvoiceItem item : invoice.getInvoiceItems()) {
             product productobj = resolveInvoiceProduct(item);
             if (item.getReturnedQuantity() == null) item.setReturnedQuantity(0);
 
+            int soldQuantity = item.getQuantity() == null ? 0 : item.getQuantity();
+            if (Boolean.TRUE.equals(item.getAutoCreateProduct()) && productobj == null) {
+                productobj = createOrRestockDirectSaleProduct(item, soldQuantity, invoice.getInvoiceNumber());
+            }
+
             if (productobj != null) {
                 int availableQuantity = productobj.getQuantity() == null ? 0 : productobj.getQuantity();
-                int soldQuantity = item.getQuantity() == null ? 0 : item.getQuantity();
 
                 if (availableQuantity < soldQuantity) {
                     throw new RuntimeException("Insufficient stock for " + productobj.getProductName());
@@ -249,12 +255,20 @@ public class InvoiceService {
             double itemTotal = (item.getQuantity() == null ? 0 : item.getQuantity()) * sellPrice;
             item.setTotalPrice(itemTotal);
 
-            totalAmount += itemTotal;
+            subtotalAmount += itemTotal;
 
             item.setInvoice(invoice);
         }
 
+        double discountAmount = Math.max(0, invoice.getDiscountAmount() == null ? 0 : invoice.getDiscountAmount());
+        discountAmount = Math.min(discountAmount, subtotalAmount);
+        double totalAmount = Math.max(0, subtotalAmount - discountAmount);
+        invoice.setDiscountAmount(discountAmount);
         invoice.setTotalAmount(totalAmount);
+        double paidAmount = Math.max(0, invoice.getPaidAmount() == null ? totalAmount : invoice.getPaidAmount());
+        paidAmount = Math.min(paidAmount, totalAmount);
+        invoice.setPaidAmount(paidAmount);
+        invoice.setRemainingAmount(Math.max(0, totalAmount - paidAmount));
 
         Invoice savedInvoice = invoiceRepository.save(invoice);
 
@@ -281,6 +295,35 @@ public class InvoiceService {
         return null;
     }
 
+    private product createOrRestockDirectSaleProduct(InvoiceItem item, int soldQuantity, String invoiceNumber) {
+        String productName = item.getDescription() == null || item.getDescription().isBlank()
+                ? "Direct billing item"
+                : item.getDescription().trim();
+        product productObj = productRepository.findFirstByProductNameIgnoreCase(productName)
+                .orElseGet(product::new);
+
+        productObj.setProductName(productName);
+        productObj.setCategory(item.getStockCategory() == null || item.getStockCategory().isBlank()
+                ? "Accessories"
+                : item.getStockCategory());
+        productObj.setPurchasePrice(item.getPurchasePrice() == null ? 0 : item.getPurchasePrice());
+        productObj.setSellPrice(item.getSellPrice() == null ? 0 : item.getSellPrice());
+        productObj.setMinimumStock(productObj.getMinimumStock() == null ? 0 : productObj.getMinimumStock());
+        productObj.setQuantity((productObj.getQuantity() == null ? 0 : productObj.getQuantity()) + soldQuantity);
+        productObj = productRepository.save(productObj);
+
+        if (soldQuantity > 0) {
+            StockHistory history = new StockHistory();
+            history.setProducthistory(productObj);
+            history.setQuantity(soldQuantity);
+            history.setStockType("IN");
+            history.setNote("Direct stock added while creating Invoice " + invoiceNumber + " | " + productIdentity(productObj));
+            stockHistoryRepository.save(history);
+        }
+
+        return productObj;
+    }
+
     private Customer resolveCustomer(Customer incomingCustomer) {
         if (incomingCustomer == null) return null;
 
@@ -304,6 +347,7 @@ public class InvoiceService {
         if (invoice.getInvoiceItems() == null) return;
 
         for (InvoiceItem oldItem : invoice.getInvoiceItems()) {
+            if (Boolean.TRUE.equals(oldItem.getAutoCreateProduct())) continue;
             product oldProduct = oldItem.getProductInvoiceitem();
             if (oldProduct != null && oldProduct.getId() != null) {
                 product productObj = productRepository.findById(oldProduct.getId())
@@ -410,6 +454,10 @@ public class InvoiceService {
             }
         }
 
+        double discountAmount = Math.max(0, invoice.getDiscountAmount() == null ? 0 : invoice.getDiscountAmount());
+        discountAmount = Math.min(discountAmount, totalAmount);
+        totalAmount = Math.max(0, totalAmount - discountAmount);
+        invoice.setDiscountAmount(discountAmount);
         invoice.setTotalAmount(totalAmount);
         double paidAmount = invoice.getPaidAmount() == null ? 0 : invoice.getPaidAmount();
         invoice.setPaidAmount(Math.min(paidAmount, totalAmount));
