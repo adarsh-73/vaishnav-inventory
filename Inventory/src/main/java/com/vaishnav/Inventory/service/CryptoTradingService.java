@@ -234,7 +234,7 @@ public class CryptoTradingService {
             map.put("finalScore", finalScore);
             map.put("entry", livePrice);
             map.put("currentPrice", livePrice);
-            map.put("priceSource", "BINANCE_REAL");
+            map.put("priceSource", marketDataService.getSpotSource());
             map.put("marketWarning", "");
             map.put("stopLoss", stopLoss);
             map.put("takeProfit", takeProfit);
@@ -262,7 +262,7 @@ public class CryptoTradingService {
             futuresData.put("largeTradeBias", futures.largeTradeBias);
             futuresData.put("derivativesScore", derivativesScore);
             futuresData.put("fetchedAt", futures.fetchedAt);
-            futuresData.put("source", "BINANCE_FUTURES_REAL");
+            futuresData.put("source", marketDataService.getFuturesSource());
             map.put("futuresData", futuresData);
             map.put("liquidationData", liquidations);
             map.put("whaleData", Map.of(

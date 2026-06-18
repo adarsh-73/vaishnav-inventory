@@ -9,7 +9,21 @@ import java.util.*;
 @Service
 public class CryptoMarketDataService {
 
+    private static final List<String> SPOT_BASES = List.of(
+            "https://data-api.binance.vision",
+            "https://api.binance.com",
+            "https://api1.binance.com",
+            "https://api2.binance.com"
+    );
+    private static final List<String> FUTURES_BASES = List.of(
+            "https://fapi.binance.com",
+            "https://fapi1.binance.com",
+            "https://fapi2.binance.com"
+    );
+
     private final RestTemplate restTemplate;
+    private volatile String lastSpotSource = "BINANCE_NOT_FETCHED";
+    private volatile String lastFuturesSource = "BINANCE_FUTURES_NOT_FETCHED";
 
     public CryptoMarketDataService() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -19,8 +33,8 @@ public class CryptoMarketDataService {
     }
 
     public List<Candle> getCandles(String symbol, String interval, int limit) {
-        String url = "https://api.binance.com/api/v3/klines?symbol=" + symbol + "&interval=" + interval + "&limit=" + limit;
-        Object[] response = restTemplate.getForObject(url, Object[].class);
+        String path = "/api/v3/klines?symbol=" + symbol + "&interval=" + interval + "&limit=" + limit;
+        Object[] response = getSpot(path, Object[].class);
         List<Candle> candles = new ArrayList<>();
         if (response == null) return candles;
 
@@ -43,7 +57,7 @@ public class CryptoMarketDataService {
     }
 
     public double getLivePrice(String symbol) {
-        Map<?, ?> response = restTemplate.getForObject("https://api.binance.com/api/v3/ticker/price?symbol=" + symbol, Map.class);
+        Map<?, ?> response = getSpot("/api/v3/ticker/price?symbol=" + symbol, Map.class);
         if (response == null || response.get("price") == null) throw new RuntimeException("Live price not found for " + symbol);
         return parseDouble(response.get("price"));
     }
@@ -51,9 +65,9 @@ public class CryptoMarketDataService {
     public FuturesStats getFuturesStats(String symbol) {
         FuturesStats stats = new FuturesStats();
         stats.symbol = symbol;
-        Map<?, ?> openInterest = safeMap("https://fapi.binance.com/fapi/v1/openInterest?symbol=" + symbol);
-        Map<?, ?> premium = safeMap("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" + symbol);
-        Map<?, ?> ticker = safeMap("https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=" + symbol);
+        Map<?, ?> openInterest = safeFuturesMap("/fapi/v1/openInterest?symbol=" + symbol);
+        Map<?, ?> premium = safeFuturesMap("/fapi/v1/premiumIndex?symbol=" + symbol);
+        Map<?, ?> ticker = safeFuturesMap("/fapi/v1/ticker/24hr?symbol=" + symbol);
 
         stats.openInterest = parseDouble(openInterest.get("openInterest"));
         stats.fundingRate = parseDouble(premium.get("lastFundingRate"));
@@ -63,7 +77,7 @@ public class CryptoMarketDataService {
         stats.priceChangePercent24h = parseDouble(ticker.get("priceChangePercent"));
         stats.quoteVolume24h = parseDouble(ticker.get("quoteVolume"));
 
-        List<Map<String, Object>> oiHistory = safeList("https://fapi.binance.com/futures/data/openInterestHist?symbol=" + symbol + "&period=5m&limit=30");
+        List<Map<String, Object>> oiHistory = safeFuturesList("/futures/data/openInterestHist?symbol=" + symbol + "&period=5m&limit=30");
         if (oiHistory.size() >= 2) {
             double first = parseDouble(oiHistory.get(0).get("sumOpenInterest"));
             double latest = parseDouble(oiHistory.get(oiHistory.size() - 1).get("sumOpenInterest"));
@@ -71,7 +85,7 @@ public class CryptoMarketDataService {
             stats.openInterestValue = parseDouble(oiHistory.get(oiHistory.size() - 1).get("sumOpenInterestValue"));
         }
 
-        List<Map<String, Object>> ratios = safeList("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=" + symbol + "&period=5m&limit=1");
+        List<Map<String, Object>> ratios = safeFuturesList("/futures/data/globalLongShortAccountRatio?symbol=" + symbol + "&period=5m&limit=1");
         if (!ratios.isEmpty()) {
             Map<String, Object> latest = ratios.get(ratios.size() - 1);
             stats.longShortRatio = parseDouble(latest.get("longShortRatio"));
@@ -79,7 +93,7 @@ public class CryptoMarketDataService {
             stats.shortAccount = parseDouble(latest.get("shortAccount"));
         }
 
-        List<Map<String, Object>> taker = safeList("https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=" + symbol + "&period=5m&limit=1");
+        List<Map<String, Object>> taker = safeFuturesList("/futures/data/takerlongshortRatio?symbol=" + symbol + "&period=5m&limit=1");
         if (!taker.isEmpty()) stats.takerBuySellRatio = parseDouble(taker.get(taker.size() - 1).get("buySellRatio"));
 
         populateLargeTradeFlow(stats, symbol);
@@ -88,7 +102,7 @@ public class CryptoMarketDataService {
     }
 
     public Map<String, Object> getFearGreed() {
-        Map<?, ?> response = safeMap("https://api.alternative.me/fng/?limit=1");
+        Map<?, ?> response = safeExternalMap("https://api.alternative.me/fng/?limit=1");
         Object rawData = response.get("data");
         if (!(rawData instanceof List<?> data) || data.isEmpty() || !(data.get(0) instanceof Map<?, ?> latest)) {
             return Map.of("status", "UNAVAILABLE", "source", "ALTERNATIVE_ME");
@@ -103,7 +117,7 @@ public class CryptoMarketDataService {
     }
 
     private void populateLargeTradeFlow(FuturesStats stats, String symbol) {
-        List<Map<String, Object>> trades = safeList("https://fapi.binance.com/fapi/v1/aggTrades?symbol=" + symbol + "&limit=1000");
+        List<Map<String, Object>> trades = safeFuturesList("/fapi/v1/aggTrades?symbol=" + symbol + "&limit=1000");
         double threshold = Math.max(50_000, stats.quoteVolume24h * 0.00001);
         stats.largeTradeThreshold = threshold;
         for (Map<String, Object> trade : trades) {
@@ -118,25 +132,67 @@ public class CryptoMarketDataService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> safeList(String url) {
-        try {
-            List<?> response = restTemplate.getForObject(url, List.class);
-            if (response == null) return List.of();
-            List<Map<String, Object>> result = new ArrayList<>();
-            for (Object item : response) if (item instanceof Map<?, ?> map) result.add((Map<String, Object>) map);
-            return result;
-        } catch (Exception ignored) {
-            return List.of();
+    private List<Map<String, Object>> safeFuturesList(String path) {
+        for (String base : FUTURES_BASES) {
+            try {
+                List<?> response = restTemplate.getForObject(base + path, List.class);
+                if (response == null) continue;
+                lastFuturesSource = base;
+                List<Map<String, Object>> result = new ArrayList<>();
+                for (Object item : response) if (item instanceof Map<?, ?> map) result.add((Map<String, Object>) map);
+                return result;
+            } catch (Exception ignored) {
+                // Try the next official Binance futures host.
+            }
         }
+        return List.of();
     }
 
-    private Map<?, ?> safeMap(String url) {
+    private Map<?, ?> safeFuturesMap(String path) {
+        for (String base : FUTURES_BASES) {
+            try {
+                Map<?, ?> response = restTemplate.getForObject(base + path, Map.class);
+                if (response == null) continue;
+                lastFuturesSource = base;
+                return response;
+            } catch (Exception ignored) {
+                // Try the next official Binance futures host.
+            }
+        }
+        return Map.of();
+    }
+
+    private Map<?, ?> safeExternalMap(String url) {
         try {
             Map<?, ?> response = restTemplate.getForObject(url, Map.class);
             return response == null ? Map.of() : response;
         } catch (Exception ignored) {
             return Map.of();
         }
+    }
+
+    private <T> T getSpot(String path, Class<T> type) {
+        Exception lastError = null;
+        for (String base : SPOT_BASES) {
+            try {
+                T response = restTemplate.getForObject(base + path, type);
+                if (response != null) {
+                    lastSpotSource = base;
+                    return response;
+                }
+            } catch (Exception error) {
+                lastError = error;
+            }
+        }
+        throw new RuntimeException("All official Binance public market-data hosts failed" + (lastError == null ? "" : ": " + lastError.getMessage()));
+    }
+
+    public String getSpotSource() {
+        return lastSpotSource;
+    }
+
+    public String getFuturesSource() {
+        return lastFuturesSource;
     }
 
     private double parseDouble(Object value) {
