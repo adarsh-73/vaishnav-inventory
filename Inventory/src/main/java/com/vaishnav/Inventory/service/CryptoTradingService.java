@@ -600,7 +600,7 @@ public class CryptoTradingService {
         audit.setAllowed(Boolean.TRUE.equals(signal.get("allowed")));
         audit.setFinalScore(toDouble(signal.get("finalScore")));
         audit.setDataReadiness(String.valueOf(signal.getOrDefault("dataReadiness", "UNKNOWN")));
-        audit.setBlockReason(String.valueOf(signal.getOrDefault("blockReason", "")));
+        audit.setBlockReason(truncate(String.valueOf(signal.getOrDefault("blockReason", "")), 250));
         audit.setEngineVersion(ENGINE_VERSION);
         audit.setCompleteSnapshot(toJson(signal.get("completeSnapshot")));
         audit.setDecisionEvidence(toJson(signal.get("decisionEvidence")));
@@ -638,9 +638,9 @@ public class CryptoTradingService {
         if (!missing.isEmpty()) reasons.add("Mandatory engines unavailable: " + String.join(", ", missing));
         if (macroBlocked) reasons.add("Macro/news risk guard blocked this direction");
         if (fundingRisk) reasons.add("Funding rate exceeds safety limit");
-        if (!aligned) reasons.add("15m, 1h and 4h are not all in the same direction");
+        if (!aligned) reasons.add("At least 2 of 3 technical timeframes do not agree");
         if (!derivativesAligned) reasons.add("Futures/order-book/CVD confirmation is below 55%");
-        if (!aiAligned) reasons.add("Gemini + another live AI do not agree with the technical candidate");
+        if (!aiAligned) reasons.add("Live multi-provider AI consensus does not agree with the technical candidate");
         if (aiConfidence < 60) reasons.add("Winning AI direction confidence is below 60%");
         if (finalScore < 65) reasons.add("Weighted all-engine score is " + finalScore + "% (minimum 65%)");
         if (reasons.isEmpty()) reasons.add("Deterministic risk circuit blocked the trade");
@@ -702,6 +702,11 @@ public class CryptoTradingService {
 
     private String toJson(Object value) {
         try { return objectMapper.writeValueAsString(value); } catch (Exception ignored) { return "{}"; }
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) return value;
+        return value.substring(0, Math.max(0, maxLength - 1)) + "…";
     }
 
     private double orDefault(Double value, double fallback) { return value == null ? fallback : value; }
