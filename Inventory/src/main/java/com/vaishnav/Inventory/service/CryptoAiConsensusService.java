@@ -267,7 +267,7 @@ public class CryptoAiConsensusService {
                     "model", model,
                     "messages", List.of(Map.of("role", "system", "content", INSTRUCTIONS), Map.of("role", "user", "content", prompt)),
                     "response_format", Map.of("type", "json_object"),
-                    "max_tokens", 250,
+                    "max_tokens", 600,
                     "temperature", 0.1,
                     "stream", false
             );
@@ -287,7 +287,10 @@ public class CryptoAiConsensusService {
     private Map<String, Object> parseVote(String provider, String model, String raw) throws Exception {
         String cleaned = raw == null ? "" : raw.replace("```json", "").replace("```", "").trim();
         int start = cleaned.indexOf('{'), end = cleaned.lastIndexOf('}');
-        if (start < 0 || end <= start) throw new IllegalArgumentException("Provider did not return JSON");
+        if (start < 0 || end <= start) {
+            String preview = cleaned.length() > 120 ? cleaned.substring(0, 120) : cleaned;
+            throw new IllegalArgumentException("Provider did not return complete JSON" + (preview.isBlank() ? " (empty response)" : ": " + preview));
+        }
         Map<String, Object> parsed = objectMapper.readValue(cleaned.substring(start, end + 1), new TypeReference<>() {});
         String signal = String.valueOf(parsed.getOrDefault("signal", "NO_TRADE")).toUpperCase(Locale.ROOT);
         if (!Set.of("LONG", "SHORT", "NO_TRADE").contains(signal)) signal = "NO_TRADE";
