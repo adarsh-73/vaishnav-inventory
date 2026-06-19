@@ -16,6 +16,7 @@ public class CryptoDecisionAudit {
     private Boolean allowed;
     private Double finalScore;
     private String dataReadiness;
+    @Column(columnDefinition = "TEXT")
     private String blockReason;
     private String engineVersion;
     private Long openedTradeId;

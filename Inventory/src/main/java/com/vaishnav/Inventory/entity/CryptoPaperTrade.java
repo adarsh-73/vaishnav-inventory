@@ -38,7 +38,10 @@ public class CryptoPaperTrade {
     private Boolean breakEvenMoved;
 
     private String bestAi;
+    @Column(columnDefinition = "TEXT")
     private String aiConsensus;
+
+    @Column(columnDefinition = "TEXT")
     private String technicalSummary;
     private String newsRisk;
     private String macroBias;
