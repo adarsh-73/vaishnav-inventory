@@ -11,12 +11,14 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
 
 @Service
 public class CryptoAiConsensusService {
 
     private static final long CACHE_MS = 10 * 60 * 1000L;
-    private static final String INSTRUCTIONS = "You are a conservative crypto market risk reviewer. Analyze only the supplied real market snapshot. Do not invent data. Return strict JSON with signal LONG, SHORT, or NO_TRADE; confidence 0-100; and a short reason. Prefer NO_TRADE when evidence conflicts. This is paper-trading analysis, not a profit guarantee.";
+    private static final int MIN_LIVE_PROVIDERS = 2;
+    private static final String INSTRUCTIONS = "You are a conservative crypto paper-trading risk reviewer. Analyze every supplied engine: market microstructure, technical timeframes, derivatives, liquidations, macro, published news, attributed whales, on-chain metrics, risk policy, and data readiness. Never invent missing data. Return strict JSON with signal LONG, SHORT, or NO_TRADE; confidence 0-100; horizon SCALP, INTRADAY, or SWING; short reason; riskFlags array; and dataGaps array. Prefer NO_TRADE when mandatory data is missing or evidence conflicts. The deterministic risk engine has final authority.";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate;
@@ -24,8 +26,10 @@ public class CryptoAiConsensusService {
 
     @Value("${OPENAI_API_KEY:}") private String openAiKey;
     @Value("${OPENAI_MODEL:gpt-5.5}") private String openAiModel;
-    @Value("${GEMINI_API_KEY:}") private String geminiKey;
+    @Value("${GEMINI_API_KEY:${GOOGLE_API_KEY:${GOOGLE_GEMINI_API_KEY:}}}") private String geminiKey;
     @Value("${GEMINI_MODEL:gemini-3.5-flash}") private String geminiModel;
+    @Value("${ANTHROPIC_API_KEY:}") private String anthropicKey;
+    @Value("${ANTHROPIC_MODEL:claude-sonnet-4-20250514}") private String anthropicModel;
     @Value("${DEEPSEEK_API_KEY:}") private String deepSeekKey;
     @Value("${DEEPSEEK_MODEL:deepseek-chat}") private String deepSeekModel;
     @Value("${GROQ_API_KEY:}") private String groqKey;
@@ -57,6 +61,7 @@ public class CryptoAiConsensusService {
 
         votes.add(openAiKey.isBlank() ? notConfigured("ChatGPT", "OPENAI_API_KEY") : callOpenAi(prompt));
         votes.add(geminiKey.isBlank() ? notConfigured("Gemini", "GEMINI_API_KEY") : callGemini(prompt));
+        votes.add(anthropicKey.isBlank() ? notConfigured("Claude", "ANTHROPIC_API_KEY") : callAnthropic(prompt));
         votes.add(deepSeekKey.isBlank() ? notConfigured("DeepSeek", "DEEPSEEK_API_KEY") : callDeepSeek(prompt));
         votes.add(groqKey.isBlank() ? notConfigured("Groq Llama", "GROQ_API_KEY") : callOpenAiCompatible("Groq Llama", groqModel, groqKey, "https://api.groq.com/openai/v1/chat/completions", prompt));
         votes.add(cerebrasKey.isBlank() ? notConfigured("Cerebras GPT-OSS", "CEREBRAS_API_KEY") : callOpenAiCompatible("Cerebras GPT-OSS", cerebrasModel, cerebrasKey, "https://api.cerebras.ai/v1/chat/completions", prompt));
@@ -66,21 +71,77 @@ public class CryptoAiConsensusService {
         long longs = liveVotes.stream().filter(v -> "LONG".equals(v.get("signal"))).count();
         long shorts = liveVotes.stream().filter(v -> "SHORT".equals(v.get("signal"))).count();
         long noTrades = liveVotes.size() - longs - shorts;
-        String consensus = liveVotes.isEmpty() ? "NOT_CONFIGURED" : longs > shorts && longs > noTrades ? "LONG" : shorts > longs && shorts > noTrades ? "SHORT" : "NO_TRADE";
-        double confidence = liveVotes.stream().mapToDouble(v -> toDouble(v.get("confidence"))).average().orElse(0);
+        String majoritySignal = longs > shorts && longs > noTrades ? "LONG" : shorts > longs && shorts > noTrades ? "SHORT" : "NO_TRADE";
+        boolean geminiLive = liveVotes.stream().anyMatch(v -> "Gemini".equals(v.get("ai")));
+        boolean quorumReady = liveVotes.size() >= MIN_LIVE_PROVIDERS && geminiLive;
+        String consensus = quorumReady ? majoritySignal : "NO_TRADE";
+        double confidence = liveVotes.stream()
+                .filter(v -> majoritySignal.equals(v.get("signal")))
+                .mapToDouble(v -> toDouble(v.get("confidence")))
+                .average().orElse(0);
+        double voteTotal = Math.max(1, liveVotes.size());
+        double longConfidenceTotal = liveVotes.stream().filter(v -> "LONG".equals(v.get("signal"))).mapToDouble(v -> toDouble(v.get("confidence"))).sum();
+        double shortConfidenceTotal = liveVotes.stream().filter(v -> "SHORT".equals(v.get("signal"))).mapToDouble(v -> toDouble(v.get("confidence"))).sum();
+        long aiLongAverage = Math.round(longConfidenceTotal / voteTotal);
+        long aiShortAverage = Math.round(shortConfidenceTotal / voteTotal);
+        long aiNoTradeAverage = Math.max(0, 100 - aiLongAverage - aiShortAverage);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("signal", consensus);
         result.put("confidence", Math.round(confidence));
         result.put("configuredProviders", liveVotes.size());
-        result.put("requiredForConsensus", 1);
+        result.put("liveProviders", liveVotes.size());
+        result.put("requiredForConsensus", MIN_LIVE_PROVIDERS);
+        result.put("geminiRequired", true);
+        result.put("geminiLive", geminiLive);
+        result.put("quorumReady", quorumReady);
+        result.put("consensusStatus", quorumReady ? "READY" : geminiLive ? "NEED_ONE_MORE_LIVE_AI" : "GEMINI_NOT_LIVE");
+        result.put("longVotePercent", Math.round(longs * 100.0 / voteTotal));
+        result.put("shortVotePercent", Math.round(shorts * 100.0 / voteTotal));
+        result.put("noTradeVotePercent", Math.round(noTrades * 100.0 / voteTotal));
+        result.put("aiLongAveragePercent", aiLongAverage);
+        result.put("aiShortAveragePercent", aiShortAverage);
+        result.put("aiNoTradeAveragePercent", aiNoTradeAverage);
+        result.put("liveProviderNames", liveVotes.stream().map(v -> v.get("ai")).toList());
         result.put("weighting", "EQUAL_WEIGHT_PER_LIVE_PROVIDER");
         result.put("tieRule", "NO_TRADE");
         result.put("votes", votes);
-        result.put("source", liveVotes.isEmpty() ? "NO_LLM_KEYS" : "REAL_PROVIDER_APIS");
+        result.put("source", liveVotes.isEmpty() ? "NO_LIVE_LLM_APIS" : "REAL_PROVIDER_APIS");
         result.put("cachedForSeconds", CACHE_MS / 1000);
         cache.put(cacheKey, new CachedConsensus(System.currentTimeMillis(), result));
         return result;
+    }
+
+    public Map<String, Object> providerStatus() {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("OpenAI", providerConfig(!openAiKey.isBlank(), openAiModel, "OPENAI_API_KEY"));
+        status.put("Gemini", providerConfig(!geminiKey.isBlank(), geminiModel, "GEMINI_API_KEY / GOOGLE_API_KEY"));
+        status.put("Claude", providerConfig(!anthropicKey.isBlank(), anthropicModel, "ANTHROPIC_API_KEY"));
+        status.put("DeepSeek", providerConfig(!deepSeekKey.isBlank(), deepSeekModel, "DEEPSEEK_API_KEY"));
+        status.put("Groq", providerConfig(!groqKey.isBlank(), groqModel, "GROQ_API_KEY"));
+        status.put("Cerebras", providerConfig(!cerebrasKey.isBlank(), cerebrasModel, "CEREBRAS_API_KEY"));
+        status.put("Mistral", providerConfig(!mistralKey.isBlank(), mistralModel, "MISTRAL_API_KEY"));
+        return status;
+    }
+
+    public void clearCache() { cache.clear(); }
+
+    public Map<String, Object> verifyProvidersNow() {
+        String healthSymbol = "AI_PROVIDER_HEALTHCHECK";
+        cache.remove(healthSymbol);
+        Map<String, Object> result = analyze(healthSymbol, Map.of(
+                "purpose", "Verify that configured provider APIs return a parseable trade-review JSON response",
+                "paperOnly", true,
+                "candidateSignal", "NO_TRADE",
+                "dataReadiness", "HEALTHCHECK_NOT_A_MARKET_DECISION"
+        ));
+        result.put("verificationOnly", true);
+        result.put("verifiedAt", Instant.now().toString());
+        return result;
+    }
+
+    private Map<String, Object> providerConfig(boolean configured, String model, String keyName) {
+        return Map.of("configured", configured, "model", model, "requiredEnvironmentVariable", keyName);
     }
 
     private Map<String, Object> callOpenAi(String prompt) {
@@ -93,6 +154,24 @@ public class CryptoAiConsensusService {
             body.put("instructions", INSTRUCTIONS);
             body.put("input", prompt);
             body.put("max_output_tokens", 250);
+            body.put("text", Map.of("format", Map.of(
+                    "type", "json_schema",
+                    "name", "trade_vote",
+                    "strict", true,
+                    "schema", Map.of(
+                            "type", "object",
+                            "properties", Map.of(
+                                    "signal", Map.of("type", "string", "enum", List.of("LONG", "SHORT", "NO_TRADE")),
+                                    "confidence", Map.of("type", "number", "minimum", 0, "maximum", 100),
+                                    "horizon", Map.of("type", "string", "enum", List.of("SCALP", "INTRADAY", "SWING")),
+                                    "reason", Map.of("type", "string"),
+                                    "riskFlags", Map.of("type", "array", "items", Map.of("type", "string")),
+                                    "dataGaps", Map.of("type", "array", "items", Map.of("type", "string"))
+                            ),
+                            "required", List.of("signal", "confidence", "horizon", "reason", "riskFlags", "dataGaps"),
+                            "additionalProperties", false
+                    )
+            )));
             JsonNode root = exchange("https://api.openai.com/v1/responses", headers, body);
             StringBuilder text = new StringBuilder();
             for (JsonNode output : root.path("output")) {
@@ -119,6 +198,25 @@ public class CryptoAiConsensusService {
             return parseVote("Gemini", geminiModel, text);
         } catch (Exception error) {
             return providerError("Gemini", geminiModel, error);
+        }
+    }
+
+    private Map<String, Object> callAnthropic(String prompt) {
+        try {
+            HttpHeaders headers = jsonHeaders();
+            headers.set("x-api-key", anthropicKey);
+            headers.set("anthropic-version", "2023-06-01");
+            Map<String, Object> body = Map.of(
+                    "model", anthropicModel,
+                    "max_tokens", 300,
+                    "system", INSTRUCTIONS,
+                    "messages", List.of(Map.of("role", "user", "content", prompt))
+            );
+            JsonNode root = exchange("https://api.anthropic.com/v1/messages", headers, body);
+            String text = root.path("content").path(0).path("text").asText();
+            return parseVote("Claude", anthropicModel, text);
+        } catch (Exception error) {
+            return providerError("Claude", anthropicModel, error);
         }
     }
 
@@ -178,20 +276,25 @@ public class CryptoAiConsensusService {
         vote.put("ai", provider);
         vote.put("model", model);
         vote.put("status", "LIVE");
+        vote.put("verification", "VERIFIED_PROVIDER_API_RESPONSE");
+        vote.put("verifiedAt", Instant.now().toString());
         vote.put("signal", signal);
         vote.put("confidence", Math.round(confidence));
         vote.put("reason", String.valueOf(parsed.getOrDefault("reason", "No reason returned")));
+        vote.put("horizon", String.valueOf(parsed.getOrDefault("horizon", "INTRADAY")));
+        vote.put("riskFlags", parsed.getOrDefault("riskFlags", List.of()));
+        vote.put("dataGaps", parsed.getOrDefault("dataGaps", List.of()));
         return vote;
     }
 
     private Map<String, Object> notConfigured(String provider, String keyName) {
-        return Map.of("ai", provider, "status", "NOT_CONFIGURED", "signal", "NO_VOTE", "confidence", 0, "reason", keyName + " required");
+        return Map.of("ai", provider, "status", "NOT_CONFIGURED", "verification", "NO_API_CALL", "signal", "NO_VOTE", "confidence", 0, "reason", keyName + " required");
     }
 
     private Map<String, Object> providerError(String provider, String model, Exception error) {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         if (message.length() > 180) message = message.substring(0, 180);
-        return Map.of("ai", provider, "model", model, "status", "ERROR", "signal", "NO_VOTE", "confidence", 0, "reason", message);
+        return Map.of("ai", provider, "model", model, "status", "ERROR", "verification", "API_CALL_FAILED", "signal", "NO_VOTE", "confidence", 0, "reason", message);
     }
 
     private HttpHeaders jsonHeaders() {

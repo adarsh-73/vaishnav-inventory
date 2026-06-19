@@ -3,6 +3,7 @@ package com.vaishnav.Inventory.Controller;
 import com.vaishnav.Inventory.entity.CryptoPaperTrade;
 import com.vaishnav.Inventory.service.CryptoExchangeService;
 import com.vaishnav.Inventory.service.CryptoTradingService;
+import com.vaishnav.Inventory.service.CryptoAiConsensusService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +20,9 @@ public class CryptoTradingController {
 
     @Autowired
     private CryptoExchangeService cryptoExchangeService;
+
+    @Autowired
+    private CryptoAiConsensusService cryptoAiConsensusService;
 
     @GetMapping("/dashboard")
     public Map<String, Object> dashboard() {
@@ -48,5 +52,26 @@ public class CryptoTradingController {
     @PostMapping("/binance/disconnect")
     public Map<String, Object> disconnectBinance() {
         return cryptoExchangeService.disconnect();
+    }
+
+    @GetMapping("/ai/status")
+    public Map<String, Object> aiStatus() {
+        return cryptoAiConsensusService.providerStatus();
+    }
+
+    @PostMapping("/ai/cache/clear")
+    public Map<String, Object> clearAiCache() {
+        cryptoAiConsensusService.clearCache();
+        return Map.of("status", "CLEARED");
+    }
+
+    @PostMapping("/ai/verify")
+    public Map<String, Object> verifyAiProviders() {
+        return cryptoAiConsensusService.verifyProvidersNow();
+    }
+
+    @DeleteMapping("/paper-history/reset")
+    public Map<String, Object> resetPaperHistory() {
+        return cryptoTradingService.resetOldPaperTrades();
     }
 }

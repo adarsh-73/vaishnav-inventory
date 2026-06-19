@@ -1,237 +1,130 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../utils/api";
 
-const COIN_NAMES = { BTCUSDT: "Bitcoin", ETHUSDT: "Ethereum", SOLUSDT: "Solana", BNBUSDT: "BNB" };
+const COINS = { BTCUSDT:["₿","Bitcoin"], ETHUSDT:["◆","Ethereum"], SOLUSDT:["S","Solana"], BNBUSDT:["B","BNB"] };
+const TABS = ["Overview","Markets","Intelligence","Paper Trades"];
 
 export default function CryptoTrading() {
-  const [dashboard, setDashboard] = useState(null);
-  const [selectedSymbol, setSelectedSymbol] = useState("BTCUSDT");
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [lastLoaded, setLastLoaded] = useState(null);
+  const [dashboard,setDashboard]=useState(null);
+  const [selectedSymbol,setSelectedSymbol]=useState("BTCUSDT");
+  const [activeTab,setActiveTab]=useState("Overview");
+  const [loading,setLoading]=useState(true);
+  const [actionLoading,setActionLoading]=useState(false);
+  const [error,setError]=useState("");
+  const [lastLoaded,setLastLoaded]=useState(null);
 
-  const loadDashboard = useCallback(async () => {
-    try {
-      const data = await apiRequest("/crypto/dashboard");
-      setDashboard(data);
-      setError("");
-      setLastLoaded(new Date());
-      const symbols = data?.symbols || [];
-      if (symbols.length && !symbols.some((item) => item.symbol === selectedSymbol)) setSelectedSymbol(symbols[0].symbol);
-    } catch (requestError) {
-      setError(requestError.message || "Crypto backend load nahi hua");
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedSymbol]);
+  const loadDashboard=useCallback(async()=>{
+    try{const data=await apiRequest("/crypto/dashboard");setDashboard(data);setError("");setLastLoaded(new Date());const symbols=data?.symbols||[];if(symbols.length&&!symbols.some(x=>x.symbol===selectedSymbol))setSelectedSymbol(symbols[0].symbol)}
+    catch(e){setError(e.message||"Crypto backend load nahi hua")}
+    finally{setLoading(false)}
+  },[selectedSymbol]);
 
-  useEffect(() => {
-    loadDashboard();
-    const timer = setInterval(loadDashboard, 60_000);
-    return () => clearInterval(timer);
-  }, [loadDashboard]);
+  useEffect(()=>{loadDashboard();const timer=setInterval(loadDashboard,60000);return()=>clearInterval(timer)},[loadDashboard]);
+  const runAction=async(path,message)=>{if(actionLoading)return;setActionLoading(true);try{await apiRequest(path,{method:"POST"});await loadDashboard();window.alert(message)}catch(e){window.alert(e.message||"Action failed")}finally{setActionLoading(false)}};
 
-  const runAction = async (path, successMessage) => {
-    if (actionLoading) return;
-    setActionLoading(true);
-    try {
-      await apiRequest(path, { method: "POST" });
-      await loadDashboard();
-      window.alert(successMessage);
-    } catch (actionError) {
-      window.alert(actionError.message || "Action failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  const signals=useMemo(()=>dashboard?.symbols||[],[dashboard]);
+  const selected=useMemo(()=>signals.find(x=>x.symbol===selectedSymbol)||signals[0]||null,[signals,selectedSymbol]);
+  const report=dashboard?.report||{}, macro=dashboard?.macroNews||{}, fearGreed=dashboard?.fearGreed||{};
+  const liveCoins=signals.filter(x=>Number(x.currentPrice)>0).length;
+  const aiProviderStatus=dashboard?.aiProviderStatus||{};
+  const configuredAi=Object.values(aiProviderStatus).filter(x=>x?.configured).length;
 
-  const signals = useMemo(() => dashboard?.symbols || [], [dashboard]);
-  const selected = useMemo(
-    () => signals.find((item) => item.symbol === selectedSymbol) || signals[0] || null,
-    [signals, selectedSymbol]
-  );
-  const aiVotes = selected?.aiVotes || [];
-  const liveAiVotes = aiVotes.filter((vote) => vote.status === "LIVE");
-  const report = dashboard?.report || {};
-  const fearGreed = dashboard?.fearGreed || {};
+  return <main className="aegis-page"><style>{css}</style>
+    <header className="aegis-header">
+      <div><span className="overline">VAISHNAV · AUTONOMOUS INTELLIGENCE</span><h1>Aegis Crypto Desk</h1><p>Real market data, multi-engine confirmation and database-tracked paper execution.</p></div>
+      <div className="header-actions"><span className="paper-badge"><i/> PAPER ONLY</span><button className="outline-btn" onClick={loadDashboard} disabled={loading}>{loading?"Loading…":"Refresh data"}</button></div>
+    </header>
 
-  return (
-    <main className="crypto-clean-page">
-      <style>{pageCss}</style>
+    <section className="status-strip">
+      <Status label="Market feed" value={`${liveCoins}/${signals.length||4} live`} tone={liveCoins?"good":"bad"}/>
+      <Status label="Macro regime" value={pretty(macro.macroBias||"Unavailable")} tone={macro.macroBias==="RISK_ON"?"good":macro.macroBias==="RISK_OFF"?"bad":"neutral"}/>
+      <Status label="News risk" value={macro.risk||"Unavailable"} tone={macro.risk==="HIGH"?"bad":macro.risk==="NORMAL"?"good":"neutral"}/>
+      <Status label="AI providers" value={`${configuredAi}/${Object.keys(aiProviderStatus).length||7} configured`} tone={configuredAi?"good":"bad"}/>
+      <Status label="Trade readiness" value={selected?.dataReadiness||"Waiting"} tone={selected?.allowed?"good":"neutral"}/>
+      <Status label="Fear & greed" value={fearGreed.value?`${number(fearGreed.value)} · ${fearGreed.classification}`:"Unavailable"} tone="neutral"/>
+      <Status label="System mode" value="Real data · Paper" tone="good"/>
+    </section>
 
-      <header className="crypto-hero">
-        <div>
-          <div className="eyebrow">REAL DATA · PAPER TRADING</div>
-          <h1>Crypto Decision Desk</h1>
-          <p>Price, indicators, derivatives aur AI consensus—sirf decision ke kaam ki cheezein.</p>
-        </div>
-        <div className="hero-actions">
-          <span className="paper-badge">REAL MONEY OFF</span>
-          <button className="secondary-btn" onClick={loadDashboard} disabled={loading}>Refresh</button>
-        </div>
-      </header>
+    {error&&<div className="error-banner"><b>Backend unavailable</b><span>{cleanError(error)}</span></div>}
+    <nav className="desk-tabs">{TABS.map(tab=><button key={tab} className={activeTab===tab?"active":""} onClick={()=>setActiveTab(tab)}>{tab}</button>)}</nav>
 
-      {error && (
-        <section className="error-banner">
-          <strong>Market feed unavailable</strong>
-          <span>{cleanError(error)}</span>
-        </section>
-      )}
+    {activeTab==="Overview"&&<Overview signals={signals} selected={selected} setSelectedSymbol={setSelectedSymbol} report={report} macro={macro} actionLoading={actionLoading} runAction={runAction}/>} 
+    {activeTab==="Markets"&&<Markets signals={signals} selected={selected} setSelectedSymbol={setSelectedSymbol}/>} 
+    {activeTab==="Intelligence"&&<Intelligence signals={signals} selected={selected} macro={macro} fearGreed={fearGreed} aiProviderStatus={aiProviderStatus}/>} 
+    {activeTab==="Paper Trades"&&<PaperTrades dashboard={dashboard} report={report} actionLoading={actionLoading} runAction={runAction}/>} 
 
-      <section className="summary-grid">
-        <Summary label="Market Feed" value={feedStatus(signals)} tone={signals.some((s) => s.currentPrice > 0) ? "good" : "bad"} />
-        <Summary label="AI Connected" value={`${liveAiVotes.length} equal votes`} tone={liveAiVotes.length ? "good" : "neutral"} />
-        <Summary label="Fear & Greed" value={fearGreed.value ? `${fearGreed.value} · ${fearGreed.classification}` : "Unavailable"} tone="neutral" />
-        <Summary label="Paper Performance" value={`${report.winRate || 0}% · ${report.totalTrades || 0} trades`} tone="neutral" />
-      </section>
-
-      <section className="market-grid">
-        {signals.map((signal) => (
-          <button
-            key={signal.symbol}
-            className={`market-card ${selected?.symbol === signal.symbol ? "selected" : ""}`}
-            onClick={() => setSelectedSymbol(signal.symbol)}
-          >
-            <div className="market-card-top">
-              <div><strong>{signal.symbol.replace("USDT", "")}</strong><small>{COIN_NAMES[signal.symbol]}</small></div>
-              <SignalBadge signal={signal.finalSignal} />
-            </div>
-            <div className="market-price">{money(signal.currentPrice || signal.entry)}</div>
-            <div className="market-meta"><span>Score {number(signal.finalScore)}%</span><span>{sourceName(signal.priceSource)}</span></div>
-            {signal.blockReason && <div className="card-warning">{cleanError(signal.blockReason)}</div>}
-          </button>
-        ))}
-        {!loading && signals.length === 0 && <div className="empty-state">Backend ne koi symbol return nahi kiya.</div>}
-      </section>
-
-      {selected && (
-        <>
-          <section className="decision-panel">
-            <div className="section-title-row">
-              <div><span className="eyebrow">SELECTED MARKET</span><h2>{selected.symbol} decision</h2></div>
-              <SignalBadge signal={selected.finalSignal} large />
-            </div>
-            <div className="decision-metrics">
-              <Metric label="Live Price" value={money(selected.currentPrice)} />
-              <Metric label="Final Score" value={`${number(selected.finalScore)}%`} />
-              <Metric label="Risk / Reward" value={`1 : ${number(selected.riskReward, 2)}`} />
-              <Metric label="Stop Loss" value={money(selected.stopLoss)} />
-              <Metric label="Take Profit" value={money(selected.takeProfit)} />
-              <Metric label="Position" value={number(selected.positionSize, 5)} />
-            </div>
-            {selected.marketWarning && <div className="inline-warning">{cleanError(selected.marketWarning)}</div>}
-          </section>
-
-          <div className="detail-grid">
-            <section className="clean-panel">
-              <h3>Timeframe confirmation</h3>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>TF</th><th>Signal</th><th>Score</th><th>RSI</th><th>ADX</th><th>Indicators</th></tr></thead>
-                  <tbody>
-                    {(selected.timeframes || []).map((row) => (
-                      <tr key={row.timeframe}>
-                        <td>{row.timeframe}</td><td><SignalBadge signal={row.signal} /></td><td>{number(row.score)}%</td>
-                        <td>{number(row.rsi, 1)}</td><td>{number(row.adx14, 1)}</td><td>{row.indicatorCount || 0} real values</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {(selected.timeframes || []).length === 0 && <div className="empty-state">Candle data available nahi hai.</div>}
-            </section>
-
-            <section className="clean-panel">
-              <h3>Equal-weight AI consensus</h3>
-              <div className="ai-list">
-                {aiVotes.map((vote) => (
-                  <div className="ai-row" key={vote.ai}>
-                    <div><strong>{vote.ai}</strong><small>{vote.model || vote.status}</small></div>
-                    <SignalBadge signal={vote.signal} />
-                    <span>{number(vote.confidence)}%</span>
-                  </div>
-                ))}
-                {!aiVotes.length && <div className="empty-state">Market snapshot ke bina AI call block hai.</div>}
-              </div>
-              <p className="panel-note">Har live provider ka vote equal hai. Tie ya market disagreement me NO_TRADE.</p>
-            </section>
-          </div>
-
-          <section className="clean-panel">
-            <h3>Derivatives & liquidation</h3>
-            <div className="derivatives-grid">
-              <Metric label="Open Interest" value={compactMoney(selected.futuresData?.openInterestValue)} />
-              <Metric label="OI Change" value={percent(selected.futuresData?.openInterestChangePercent)} />
-              <Metric label="Funding" value={number(selected.futuresData?.fundingRate, 6)} />
-              <Metric label="Long / Short" value={number(selected.futuresData?.longShortRatio, 3)} />
-              <Metric label="Taker Buy / Sell" value={number(selected.futuresData?.takerBuySellRatio, 3)} />
-              <Metric label="Large Trade Bias" value={selected.whaleData?.bias || "No data"} />
-              <Metric label="Liquidations 1h" value={`${selected.liquidationData?.eventCount || 0} events`} />
-              <Metric label="Futures Source" value={sourceName(selected.futuresData?.source)} />
-            </div>
-          </section>
-        </>
-      )}
-
-      <section className="clean-panel trade-section">
-        <div className="section-title-row">
-          <div><span className="eyebrow">DATABASE TRACKED</span><h2>Paper trades</h2></div>
-          <div className="hero-actions">
-            <button className="primary-btn" disabled={actionLoading || Boolean(error)} onClick={() => runAction("/crypto/paper-scan", "Paper scan complete")}>Run paper scan</button>
-            <button className="secondary-btn" disabled={actionLoading} onClick={() => runAction("/crypto/close-running", "Running trades checked")}>Close/check running</button>
-          </div>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Coin</th><th>Side</th><th>Status</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>AI</th></tr></thead>
-            <tbody>
-              {(dashboard?.recentTrades || []).slice(0, 10).map((trade) => (
-                <tr key={trade.id}><td>{trade.symbol}</td><td>{trade.side}</td><td>{trade.status}</td><td>{money(trade.entryPrice)}</td><td>{money(trade.exitPrice)}</td><td>{money(trade.pnl)}</td><td>{trade.bestAi || "-"}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {(dashboard?.recentTrades || []).length === 0 && <div className="empty-state">Abhi paper trade history nahi hai.</div>}
-      </section>
-
-      <footer className="crypto-footer">
-        <span>Auto refresh: 60 sec</span><span>AI cache: 10 min</span><span>Last loaded: {lastLoaded ? lastLoaded.toLocaleTimeString() : "waiting"}</span>
-      </footer>
-    </main>
-  );
+    <footer className="desk-footer"><span>Auto refresh · 60 sec</span><span>LLM cache · 10 min</span><span>Last sync · {lastLoaded?lastLoaded.toLocaleTimeString():"Waiting"}</span><span>Real money · Disabled</span></footer>
+  </main>;
 }
 
-function Summary({ label, value, tone }) { return <div className={`summary-card ${tone}`}><span>{label}</span><strong>{value}</strong></div>; }
-function Metric({ label, value }) { return <div className="metric"><span>{label}</span><strong>{value ?? "-"}</strong></div>; }
-function SignalBadge({ signal, large }) {
-  const normalized = signal === "LONG" || signal === "SHORT" ? signal : "NO_TRADE";
-  return <span className={`signal-badge ${normalized.toLowerCase()} ${large ? "large" : ""}`}>{normalized.replace("_", " ")}</span>;
+function Overview({signals,selected,setSelectedSymbol,report,macro,actionLoading,runAction}){
+  const votes=selected?.aiVotes||[], liveVotes=votes.filter(x=>x.status==="LIVE");
+  const consensus=selected?.aiConsensus||{};
+  const probability=selected?.directionProbabilities||{}, blockers=selected?.blockers||[];
+  return <>
+    <section className="asset-grid">{signals.map(signal=><AssetCard key={signal.symbol} signal={signal} selected={selected?.symbol===signal.symbol} onClick={()=>setSelectedSymbol(signal.symbol)}/>)}</section>
+    {!signals.length&&<Empty text="Backend ne abhi market snapshots return nahi kiye."/>}
+    {selected&&<div className="hero-grid">
+      <article className="panel decision-card"><PanelHead label="FINAL TRADE DECISION" right={`${selected.finalScore||0}% CANDIDATE SCORE`}/><div className="decision-main"><div className={`score-ring ${signalClass(selected.candidateSignal)}`}><b>{number(selected.finalScore)}</b><span>ENGINE SCORE</span></div><div><div className="decision-badges"><Signal signal={selected.finalSignal} large/><span className={`candidate ${signalClass(selected.candidateSignal)}`}>CANDIDATE {selected.candidateSignal||"NO TRADE"}</span></div><h2>{selected.symbol.replace("USDT","")} / USDT</h2><p>{selected.allowed?`Approved ${selected.finalSignal}: automatic paper entry can open.`:"NO TRADE because the checks listed below are not satisfied."}</p></div></div><div className="probability-grid"><div><span>ALL-ENGINE LONG</span><b className="good-text">{number(probability.longPercent)}%</b></div><div><span>ALL-ENGINE SHORT</span><b className="bad-text">{number(probability.shortPercent)}%</b></div><div><span>AI AVG LONG</span><b className="good-text">{number(probability.aiLongAveragePercent)}%</b></div><div><span>AI AVG SHORT</span><b className="bad-text">{number(probability.aiShortAveragePercent)}%</b></div><div><span>AI NO-TRADE / UNCERTAINTY</span><b>{number(probability.aiNoTradeAveragePercent)}%</b></div></div>{!selected.allowed&&<div className="blocker-list"><b>WHY NO TRADE</b>{blockers.map((reason,i)=><p key={`${reason}-${i}`}>✕ {reason}</p>)}</div>}<div className="level-grid"><Metric label="Live / entry" value={money(selected.currentPrice)}/><Metric label="Stop loss" value={money(selected.stopLoss)} tone="bad"/><Metric label="Take profit" value={money(selected.takeProfit)} tone="good"/><Metric label="Risk / reward" value={`1 : ${number(selected.riskReward,2)}`}/><Metric label="Position notional" value={compactMoney(selected.positionNotional)}/><Metric label="Account risk" value={`${number(selected.accountRiskPercent,2)}%`}/></div><Readiness readiness={selected.providerReadiness}/><p className="disclaimer">Percentages are weighted decision strength from live inputs, not guaranteed market probabilities.</p></article>
+      <article className="panel ai-decision-panel"><PanelHead label="AI VOTING ENGINE" right={`${liveVotes.length}/${consensus.requiredForConsensus||2} REQUIRED LIVE`}/><div className="ai-consensus-strip"><div><span>AVG LONG</span><b className="good-text">{number(consensus.aiLongAveragePercent)}%</b></div><div><span>AVG SHORT</span><b className="bad-text">{number(consensus.aiShortAveragePercent)}%</b></div><div><span>NO TRADE / UNCERTAINTY</span><b>{number(consensus.aiNoTradeAveragePercent)}%</b></div><div><span>AI CONSENSUS</span><Signal signal={consensus.signal}/></div></div><p className="quorum-note">{consensus.quorumReady?`Valid: Gemini + ${liveVotes.length-1} other real AI provider(s).`:`BLOCKED: Gemini LIVE plus at least one other LIVE AI required. Current: ${consensus.consensusStatus||"WAITING"}.`}</p><div className="vote-list">{votes.map(v=><div key={v.ai}><span className="ai-logo">{String(v.ai||"AI").slice(0,2)}</span><p><b>{v.ai}</b><small>{v.status} · {v.verification||"UNVERIFIED"} · {v.model||v.reason}</small></p><Signal signal={v.signal}/><em>{v.status==="LIVE"?`${number(v.confidence)}%`:"NO VOTE"}</em></div>)}{!votes.length&&<Empty text="AI provider response available nahi hai."/>}</div></article>
+    </div>}
+    <section className="overview-bottom">
+      <article className="panel"><PanelHead label="RISK COMMAND" right={macro.status||"WAITING"}/><div className="guard-list"><Guard ok={macro.risk!=="HIGH"} label="Published-news circuit" value={macro.risk||"Unavailable"}/><Guard ok={macro.macroBias!=="RISK_OFF"} label="Macro long permission" value={pretty(macro.macroBias||"Unavailable")}/><Guard ok={Number(report.todaySlotsLeft)>0} label="Daily paper slots" value={`${report.todaySlotsLeft??0} left`}/><Guard ok={true} label="Real-money execution" value="Hard disabled"/></div></article>
+      <article className="panel"><PanelHead label="NEW TRADE KAISE OPEN HOGA" right="AUTOMATIC PAPER ONLY"/><div className="trade-flow"><Guard ok={selected?.dataReadiness==="READY"} label="1 · All real data engines" value={selected?.dataReadiness||"WAITING"}/><Guard ok={Boolean(consensus.geminiLive)} label="2 · Gemini actual API vote" value={consensus.geminiLive?"LIVE":"MISSING / ERROR"}/><Guard ok={Boolean(consensus.quorumReady)} label="3 · Gemini + another live AI" value={`${liveVotes.length}/2 live`}/><Guard ok={consensus.signal===selected?.candidateSignal} label="4 · AI + technical same direction" value={`${selected?.candidateSignal||"—"} vs ${consensus.signal||"—"}`}/><Guard ok={Boolean(selected?.allowed)} label="5 · Final risk approval" value={selected?.allowed?`${selected.finalSignal} OPEN`:(selected?.blockReason||"BLOCKED")}/></div><button className="primary-btn full" disabled={actionLoading} onClick={()=>runAction("/crypto/paper-scan","Fresh guarded scan complete")}>Check fresh decision now</button></article>
+    </section>
+  </>;
 }
-function feedStatus(signals) {
-  const live = signals.filter((signal) => Number(signal.currentPrice || 0) > 0).length;
-  return live ? `${live}/${signals.length} coins live` : "Feed blocked";
-}
-function cleanError(value) {
-  const text = String(value || "");
-  if (text.includes("restricted location") || text.includes("451")) return "Binance rejected the current server region. Official alternate feed is required.";
-  if (text.length > 150) return `${text.slice(0, 150)}…`;
-  return text;
-}
-function sourceName(value) {
-  const text = String(value || "");
-  if (text.includes("data-api.binance.vision")) return "Binance Data API";
-  if (text.includes("binance")) return "Binance";
-  if (text.includes("ERROR")) return "Unavailable";
-  return text || "Waiting";
-}
-function number(value, digits = 0) { return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: digits }); }
-function money(value) { return Number(value || 0) ? `$${number(value, 2)}` : "—"; }
-function compactMoney(value) { return Number(value || 0) ? `$${Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(Number(value))}` : "—"; }
-function percent(value) { const n = Number(value || 0); return `${n > 0 ? "+" : ""}${n.toFixed(2)}%`; }
 
-const pageCss = `
-  .crypto-clean-page{min-height:100vh;background:#f4f7fb;color:#14213d;padding:28px;font-family:Inter,system-ui,-apple-system,sans-serif}.crypto-hero{display:flex;justify-content:space-between;gap:24px;align-items:center;padding:28px;border-radius:22px;background:linear-gradient(135deg,#081d3a,#123d68);color:#fff;box-shadow:0 18px 45px rgba(15,41,99,.16)}.crypto-hero h1{font-size:34px;margin:5px 0}.crypto-hero p{margin:0;color:#cbd9e8}.eyebrow{font-size:11px;font-weight:800;letter-spacing:1.8px;color:#4fb4ff}.hero-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.paper-badge,.signal-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:11px;font-weight:900;padding:7px 11px;white-space:nowrap}.paper-badge{background:#173f65;color:#9bd5ff;border:1px solid #2b5a84}.primary-btn,.secondary-btn{border:0;border-radius:10px;padding:11px 15px;font-weight:800;cursor:pointer}.primary-btn{background:#1d72d8;color:white}.secondary-btn{background:white;color:#163250;border:1px solid #d5dfeb}.primary-btn:disabled,.secondary-btn:disabled{opacity:.55;cursor:not-allowed}.error-banner{margin-top:16px;padding:16px 18px;border-radius:14px;background:#fff1f2;border:1px solid #fecdd3;color:#9f1239;display:flex;gap:12px;flex-wrap:wrap}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}.summary-card{background:#fff;padding:18px;border-radius:16px;border:1px solid #e3eaf2;display:flex;flex-direction:column;gap:6px}.summary-card span,.metric span{font-size:12px;color:#6b7c91}.summary-card strong{font-size:18px}.summary-card.good{border-top:3px solid #16a34a}.summary-card.bad{border-top:3px solid #dc2626}.market-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.market-card{background:#fff;border:1px solid #e1e8f0;border-radius:18px;padding:18px;text-align:left;cursor:pointer;color:inherit}.market-card.selected{border:2px solid #2575d4;box-shadow:0 10px 28px rgba(37,117,212,.12)}.market-card-top{display:flex;justify-content:space-between;gap:12px}.market-card-top strong{font-size:19px}.market-card-top small,.ai-row small{display:block;color:#7b8999;margin-top:3px}.market-price{font-size:27px;font-weight:900;margin:20px 0 12px}.market-meta{display:flex;justify-content:space-between;font-size:12px;color:#66758a}.card-warning,.inline-warning{margin-top:13px;border-radius:10px;padding:10px;background:#fff5f5;color:#a61b1b;font-size:12px}.signal-badge.long{background:#dcfce7;color:#15803d}.signal-badge.short{background:#fee2e2;color:#b91c1c}.signal-badge.no_trade{background:#edf1f5;color:#526173}.signal-badge.large{font-size:14px;padding:10px 17px}.decision-panel,.clean-panel{background:#fff;border:1px solid #e1e8f0;border-radius:20px;padding:22px;margin-top:18px}.section-title-row{display:flex;justify-content:space-between;align-items:center;gap:18px}.section-title-row h2,.clean-panel h3{margin:4px 0 0}.decision-metrics,.derivatives-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-top:18px}.derivatives-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.metric{background:#f7f9fc;border:1px solid #e7edf4;border-radius:13px;padding:14px;display:flex;flex-direction:column;gap:6px}.metric strong{font-size:15px;word-break:break-word}.detail-grid{display:grid;grid-template-columns:1.25fr .75fr;gap:18px}.table-wrap{overflow:auto;margin-top:14px}table{width:100%;border-collapse:collapse;min-width:650px}th,td{padding:12px 10px;text-align:left;border-bottom:1px solid #edf1f5;font-size:13px}th{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#718096}.ai-list{margin-top:12px}.ai-row{display:grid;grid-template-columns:1fr auto 52px;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #edf1f5}.panel-note,.crypto-footer{font-size:12px;color:#718096}.empty-state{padding:20px;color:#718096;text-align:center}.trade-section{margin-bottom:18px}.crypto-footer{display:flex;justify-content:center;gap:22px;padding:12px}.inline-warning{font-size:13px}
-  @media(max-width:1050px){.summary-grid,.market-grid{grid-template-columns:repeat(2,1fr)}.decision-metrics{grid-template-columns:repeat(3,1fr)}.detail-grid{grid-template-columns:1fr}.derivatives-grid{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:650px){.crypto-clean-page{padding:14px}.crypto-hero,.section-title-row{align-items:flex-start;flex-direction:column}.summary-grid,.market-grid,.decision-metrics,.derivatives-grid{grid-template-columns:1fr}.crypto-hero h1{font-size:27px}.crypto-footer{flex-direction:column;gap:5px;text-align:center}}
+function Markets({signals,selected,setSelectedSymbol}){
+  return <><section className="coin-tabs">{signals.map(x=><button key={x.symbol} className={selected?.symbol===x.symbol?"active":""} onClick={()=>setSelectedSymbol(x.symbol)}>{COINS[x.symbol]?.[0]||"•"} {x.symbol.replace("USDT","")}</button>)}</section>{selected?<>
+    <section className="market-kpis"><Metric label="Live spot" value={money(selected.currentPrice)}/><Metric label="24h volume" value={compactMoney(selected.futuresData?.quoteVolume24h)}/><Metric label="Open interest" value={compactMoney(selected.futuresData?.openInterestValue)}/><Metric label="Funding" value={percent(Number(selected.futuresData?.fundingRate||0)*100)}/><Metric label="OI change" value={percent(selected.futuresData?.openInterestChangePercent)}/><Metric label="Spot ↔ futures basis" value={percent(selected.futuresData?.spotFuturesBasisPercent)}/><Metric label="Order-book imbalance" value={percent(selected.futuresData?.orderBookImbalancePercent)}/><Metric label="Session CVD" value={compactMoney(selected.futuresData?.cvd)} tone={Number(selected.futuresData?.cvd)>=0?"good":"bad"}/></section>
+    <div className="market-layout"><article className="panel"><PanelHead label="TIMEFRAME CONFIRMATION" right="REAL CANDLES"/><div className="table-wrap"><table><thead><tr><th>Timeframe</th><th>Signal</th><th>Score</th><th>RSI</th><th>ADX</th><th>Indicators</th></tr></thead><tbody>{(selected.timeframes||[]).map(row=><tr key={row.timeframe}><td>{row.timeframe}</td><td><Signal signal={row.signal}/></td><td>{number(row.score)}%</td><td>{number(row.rsi,1)}</td><td>{number(row.adx14,1)}</td><td>{row.indicatorCount||0}</td></tr>)}</tbody></table></div></article>
+    <article className="panel"><PanelHead label="DERIVATIVES FLOW" right={sourceName(selected.futuresData?.source)}/><div className="flow-list"><Flow label="Long / Short" value={number(selected.futuresData?.longShortRatio,3)}/><Flow label="Taker buy / sell" value={number(selected.futuresData?.takerBuySellRatio,3)}/><Flow label="Bid depth" value={compactMoney(selected.futuresData?.bidDepthNotional)} tone="good"/><Flow label="Ask depth" value={compactMoney(selected.futuresData?.askDepthNotional)} tone="bad"/><Flow label="Large buy" value={compactMoney(selected.futuresData?.largeBuyNotional)} tone="good"/><Flow label="Large sell" value={compactMoney(selected.futuresData?.largeSellNotional)} tone="bad"/><Flow label="Large-trade bias" value={selected.exchangeLargeTradeProxy?.bias||"No data"}/><Flow label="Liquidations 1h" value={`${selected.liquidationData?.eventCount||0} events`}/></div></article></div>
+  </>:<Empty text="Select karne ke liye live symbol available nahi hai."/>}</>;
+}
+
+function Intelligence({signals,selected,macro,fearGreed,aiProviderStatus}){
+  const headlines=macro.headlines||[], onChain=selected?.onChainData||{}, whale=selected?.whaleData||{};
+  return <>
+    <article className="panel readiness-panel"><PanelHead label="MANDATORY ENGINE READINESS" right={selected?.dataReadiness||"WAITING"}/><Readiness readiness={selected?.providerReadiness}/><div className="ai-provider-grid">{Object.entries(aiProviderStatus||{}).map(([name,data])=><div key={name}><span>{name}</span><b className={data.configured?"good-text":"bad-text"}>{data.configured?"CONFIGURED":"MISSING KEY"}</b><small>{data.model}</small></div>)}</div></article>
+    <section className="intel-grid"><article className="panel macro-panel"><PanelHead label="MACRO ENGINE" right={macro.macroSource||"UNAVAILABLE"}/><div className={`regime-box ${String(macro.macroBias||"").toLowerCase()}`}><span>{pretty(macro.macroBias||"Unavailable")}</span><b>{macro.risk||"UNKNOWN"} RISK</b><p>{macro.futureNewsDisclaimer||"Published data only; unknown future news cannot be predicted."}</p></div><div className="macro-assets"><MacroAsset label="S&P 500" data={macro.sp500}/><MacroAsset label="Nasdaq" data={macro.nasdaq}/><MacroAsset label="VIX" data={macro.vix}/><MacroAsset label="DXY" data={macro.dxy}/><MacroAsset label="US 10Y" data={macro.us10y}/><MacroAsset label="Gold" data={macro.gold}/><MacroAsset label="Oil" data={macro.oil}/></div></article>
+    <article className="panel"><PanelHead label="NEWS SENTIMENT ENGINE" right={macro.newsSource||"UNAVAILABLE"}/><div className="news-score-row"><div><span>NET SENTIMENT</span><b className={Number(macro.newsSentimentScore)>=0?"good-text":"bad-text"}>{number(macro.newsSentimentScore)}</b></div><div><span>RISK HEADLINES</span><b className="bad-text">{number(macro.headlineRiskCount)}</b></div><div><span>FEAR & GREED</span><b>{fearGreed.value?number(fearGreed.value):"—"}</b></div></div><div className="headline-list">{headlines.slice(0,10).map((h,i)=><div key={`${h.url||h.title}-${i}`}><span className={h.sentimentLabel==="BULLISH"?"good-text":h.sentimentLabel==="BEARISH"?"bad-text":""}>{h.sentiment??i+1}</span><p><b>{h.title}</b><small>{h.source} · {h.sentimentLabel||"NEUTRAL"} · {h.publishedAt||"recent"}</small></p></div>)}{!headlines.length&&<Empty text="Published headlines provider unavailable hai."/>}</div></article></section>
+    <section className="intel-grid"><article className="panel"><PanelHead label="ATTRIBUTED WHALE ENGINE" right={whale.source||"WHALE ALERT"}/><div className="engine-detail"><Metric label="Status" value={whale.status||"NOT CONFIGURED"}/><Metric label="Bias" value={whale.bias||"NEUTRAL"}/><Metric label="Exchange inflow" value={compactMoney(whale.exchangeInflowUsd)} tone="bad"/><Metric label="Exchange outflow" value={compactMoney(whale.exchangeOutflowUsd)} tone="good"/><Metric label="Events · 6h" value={number(whale.eventCount)}/></div><p className="disclaimer">Wallet attribution requires WHALE_ALERT_API_KEY. Exchange deposit is treated as potential sell pressure; withdrawal as potential accumulation.</p></article>
+    <article className="panel"><PanelHead label="ON-CHAIN ENGINE" right={(onChain.liveProviders||[]).join(" + ")||"DATA UNAVAILABLE"}/><div className="engine-detail"><Metric label="Status" value={onChain.status||"NOT CONFIGURED"}/><Metric label="Bias" value={onChain.bias||"NEUTRAL"}/>{Object.entries(onChain.metrics||{}).map(([key,value])=><Metric key={key} label={pretty(key)} value={number(value,4)}/>)}</div><p className="disclaimer">Coin Metrics Community, DefiLlama and Mempool.space are keyless free sources. Licensed providers only enrich exchange-flow coverage; missing values are never fabricated.</p></article></section>
+    <article className="panel whale-panel"><PanelHead label="BINANCE LARGE-TRADE PROXY" right="EXCHANGE MICROSTRUCTURE"/><div className="whale-grid">{signals.map(x=><div key={x.symbol}><span>{x.symbol.replace("USDT","")}</span><b className={x.exchangeLargeTradeProxy?.bias==="BUY"?"good-text":x.exchangeLargeTradeProxy?.bias==="SELL"?"bad-text":""}>{x.exchangeLargeTradeProxy?.bias||"NO DATA"}</b><small>{compactMoney(x.exchangeLargeTradeProxy?.buyNotional)} buy · {compactMoney(x.exchangeLargeTradeProxy?.sellNotional)} sell</small></div>)}</div></article>
+  </>;
+}
+
+function PaperTrades({dashboard,report,actionLoading,runAction}){
+  const trades=dashboard?.recentTrades||[], decisions=dashboard?.recentDecisions||[], learning=dashboard?.learningReport||{};
+  return <><section className="market-kpis"><Metric label="Total trades" value={number(report.totalTrades)}/><Metric label="Win rate" value={`${number(report.winRate)}%`} tone="good"/><Metric label="Today P&L" value={money(report.todayPnl)} tone={Number(report.todayPnl)>=0?"good":"bad"}/><Metric label="Week P&L" value={money(report.weekPnl)} tone={Number(report.weekPnl)>=0?"good":"bad"}/><Metric label="Slots left" value={number(report.todaySlotsLeft)}/><Metric label="Learning samples" value={number(learning.closedTradeSamples)}/></section><article className="panel trades-panel"><div className="trade-head"><PanelHead label="DATABASE PAPER JOURNAL" right={`${trades.length} RECORDS`}/><div><button className="primary-btn" disabled={actionLoading} onClick={()=>runAction("/crypto/paper-scan","Paper scan complete")}>Run paper scan</button><button className="outline-btn" disabled={actionLoading} onClick={()=>runAction("/crypto/close-running","Running trades checked")}>Monitor running</button></div></div><div className="table-wrap"><table><thead><tr><th>Coin</th><th>Side</th><th>Status</th><th>Entry</th><th>SL / TP</th><th>Exit</th><th>P&L</th><th>Score</th><th>Close reason</th></tr></thead><tbody>{trades.map(t=><tr key={t.id}><td>{t.symbol}</td><td><Signal signal={t.side}/></td><td>{t.status}</td><td>{money(t.entryPrice)}</td><td>{money(t.stopLoss)} / {money(t.takeProfit)}</td><td>{money(t.exitPrice)}</td><td className={Number(t.pnl)>=0?"good-text":"bad-text"}>{money(t.pnl)}</td><td>{number(t.finalScore)}%</td><td>{t.closeReason||"Running"}</td></tr>)}</tbody></table></div>{!trades.length&&<Empty text="Naya Aegis V2 paper journal abhi empty hai."/>}</article>
+    <article className="panel trades-panel"><PanelHead label="DECISION AUDIT · EVERY SCAN SAVED" right={`${decisions.length} RECENT`}/><div className="table-wrap"><table><thead><tr><th>Time</th><th>Coin</th><th>Candidate</th><th>Final</th><th>Score</th><th>Readiness</th><th>Why no trade / approval</th></tr></thead><tbody>{decisions.map(d=><tr key={d.id}><td>{d.createdAt?new Date(d.createdAt).toLocaleString():"—"}</td><td>{d.symbol}</td><td><Signal signal={d.candidateSignal}/></td><td><Signal signal={d.finalSignal}/></td><td>{number(d.finalScore)}%</td><td>{d.dataReadiness}</td><td>{d.blockReason||"Approved"}</td></tr>)}</tbody></table></div>{!decisions.length&&<Empty text="Next autonomous scan se har decision yahan save hoga."/>}</article>
+    <article className="panel trades-panel"><PanelHead label="LEARNING ENGINE" right={`MIN ${learning.minimumSamplesForWeightAdjustment||20} CLOSED TRADES`}/><div className="learning-grid">{Object.entries(learning.engines||{}).map(([name,data])=><div key={name}><span>{pretty(name)}</span><b>{data.averageEntryScore||0}</b><small>{data.samples||0} samples · {data.learningActive?"WEIGHTING ACTIVE":"COLLECTING"}</small></div>)}</div><p className="disclaimer">{learning.policy||"Evidence collection starts with the new engine."}</p></article></>;
+}
+
+function AssetCard({signal,selected,onClick}){const coin=COINS[signal.symbol]||["•",signal.symbol];return <button className={`asset-card ${selected?"selected":""}`} onClick={onClick}><div className="asset-top"><span className="coin-icon">{coin[0]}</span><p><b>{signal.symbol.replace("USDT","")}</b><small>{coin[1]}</small></p><Signal signal={signal.finalSignal}/></div><strong>{money(signal.currentPrice)}</strong><div className="asset-direction"><span>Candidate</span><b className={signalClass(signal.candidateSignal)}>{signal.candidateSignal||"NO TRADE"}</b></div><div className="asset-meta"><span>Combined {number(signal.finalScore)}%</span><span>{signal.dataReadiness||sourceName(signal.priceSource)}</span></div></button>}
+function Status({label,value,tone}){return <div className={`status-item ${tone}`}><span>{label}</span><b>{value}</b></div>}
+function Readiness({readiness}){return <div className="readiness-grid">{Object.entries(readiness||{}).map(([name,status])=>{const live=String(status).startsWith("LIVE");return <div key={name}><i className={live?"ok":"stop"}>{live?"✓":"!"}</i><span>{pretty(name)}</span><b className={live?"good-text":"bad-text"}>{String(status)}</b></div>})}</div>}
+function Metric({label,value,tone}){return <div className={`metric ${tone||""}`}><span>{label}</span><b>{value??"—"}</b></div>}
+function PanelHead({label,right}){return <div className="panel-head"><span>{label}</span><em>{right}</em></div>}
+function Signal({signal,large}){const normalized=signal==="LONG"||signal==="SHORT"?signal:"NO_TRADE";return <span className={`signal ${signalClass(normalized)} ${large?"large":""}`}>{normalized.replace("_"," ")}</span>}
+function Guard({ok,label,value}){return <div><i className={ok?"ok":"stop"}>{ok?"✓":"!"}</i><span>{label}</span><b>{value}</b></div>}
+function Flow({label,value,tone}){return <div><span>{label}</span><b className={tone==="good"?"good-text":tone==="bad"?"bad-text":""}>{value}</b></div>}
+function MacroAsset({label,data}){const change=Number(data?.changePercent||0);return <div><span>{label}</span><b>{data?.status==="LIVE"?number(data.price,2):"—"}</b><small className={change>=0?"good-text":"bad-text"}>{data?.status==="LIVE"?percent(change):"Unavailable"}</small></div>}
+function Empty({text}){return <div className="empty">{text}</div>}
+function signalClass(signal){return signal==="LONG"?"long":signal==="SHORT"?"short":"no-trade"}
+function pretty(v){return String(v||"").replaceAll("_"," ")}
+function number(v,digits=0){return Number(v||0).toLocaleString("en-US",{maximumFractionDigits:digits})}
+function money(v){return Number(v||0)?`$${number(v,2)}`:"—"}
+function compactMoney(v){return Number(v||0)?`$${Intl.NumberFormat("en-US",{notation:"compact",maximumFractionDigits:2}).format(Number(v))}`:"—"}
+function percent(v){const n=Number(v||0);return `${n>0?"+":""}${n.toFixed(2)}%`}
+function sourceName(v){const s=String(v||"");if(s.includes("binance"))return"Binance";if(s.includes("ERROR")||s.includes("NOT_FETCHED"))return"Unavailable";return s||"Waiting"}
+function cleanError(v){const s=String(v||"");if(s.includes("451")||s.includes("restricted location"))return"Binance rejected this server region. Alternate official feed required.";return s.length>180?`${s.slice(0,180)}…`:s}
+
+const css=`
+.aegis-page{--bg:#07110f;--panel:#0d1915;--line:#1c3028;--muted:#72827b;--green:#2ce4a7;--red:#ef6d72;--amber:#f6b94b;min-height:100vh;background:radial-gradient(circle at 80% 0,#10251e 0,transparent 30%),var(--bg);color:#e8efec;padding:28px;font-family:Inter,Manrope,system-ui,sans-serif}.aegis-page *{box-sizing:border-box}.aegis-header{display:flex;align-items:center;justify-content:space-between;gap:22px}.overline,.panel-head span{color:var(--green);font:700 10px ui-monospace,monospace;letter-spacing:.14em}.aegis-header h1{font-size:34px;margin:7px 0 5px}.aegis-header p{color:#91a098;margin:0}.header-actions{display:flex;align-items:center;gap:10px}.paper-badge{border:1px solid #2b5b4c;background:#10251e;color:var(--green);border-radius:8px;padding:10px 12px;font:700 10px ui-monospace,monospace}.paper-badge i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:7px}.outline-btn,.primary-btn{border:1px solid #29473c;border-radius:8px;padding:10px 13px;font-weight:700;cursor:pointer}.outline-btn{background:#10201a;color:#c6d1cc}.primary-btn{background:var(--green);color:#052018;border-color:var(--green)}button:disabled{opacity:.5;cursor:not-allowed}.status-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:22px 0 14px}.status-item{background:#0b1612;padding:13px 15px;display:flex;flex-direction:column;gap:5px;border-top:2px solid #50615a}.status-item.good{border-color:var(--green)}.status-item.bad{border-color:var(--red)}.status-item.neutral{border-color:var(--amber)}.status-item span,.metric span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.status-item b{font-size:12px}.error-banner{display:flex;gap:12px;background:#32171a;border:1px solid #643039;color:#ffc2c4;padding:13px;border-radius:9px;margin:12px 0}.desk-tabs,.coin-tabs{display:flex;gap:7px;margin:16px 0;overflow:auto}.desk-tabs button,.coin-tabs button{white-space:nowrap;border:1px solid #243a32;background:#0d1b16;color:#819189;border-radius:8px;padding:9px 13px;cursor:pointer}.desk-tabs button.active,.coin-tabs button.active{border-color:#2a725c;color:var(--green);background:#10261f}.asset-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.asset-card{background:var(--panel);border:1px solid var(--line);color:inherit;padding:16px;border-radius:12px;text-align:left;cursor:pointer}.asset-card.selected{border-color:#2a8064;box-shadow:0 0 0 1px #2a8064}.asset-top{display:flex;align-items:center;gap:9px}.coin-icon,.ai-logo{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;background:#172820;color:var(--green);font-weight:800}.asset-top p{display:flex;flex-direction:column;flex:1;margin:0}.asset-top small,.vote-list small,.headline-list small{color:var(--muted);font-size:9px;margin-top:2px}.asset-card>strong{display:block;font:700 22px ui-monospace,monospace;margin:18px 0 10px}.asset-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:9px}.signal{display:inline-flex;border-radius:5px;padding:5px 7px;font:800 8px ui-monospace,monospace}.signal.long{background:#123126;color:var(--green)}.signal.short{background:#3b171b;color:var(--red)}.signal.no-trade{background:#222d29;color:#9aa8a2}.signal.large{font-size:11px;padding:7px 10px}.hero-grid,.overview-bottom,.market-layout,.intel-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:12px;margin-top:12px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:17px}.panel-head{display:flex;justify-content:space-between;align-items:center}.panel-head em{color:var(--muted);font:500 8px ui-monospace,monospace}.decision-main{display:flex;align-items:center;gap:18px;margin:23px 0}.score-ring{width:110px;aspect-ratio:1;border-radius:50%;display:grid;place-content:center;text-align:center;border:8px solid #25342e}.score-ring.long{border-color:#226f57}.score-ring.short{border-color:#743139}.score-ring b{font:800 30px ui-monospace,monospace}.score-ring span{font-size:7px;color:var(--muted)}.decision-main h2{margin:10px 0 5px}.decision-main p{color:#899991;font-size:11px;max-width:430px}.level-grid,.performance-grid,.market-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.metric{background:#09130f;border:1px solid #182820;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:7px;min-width:0}.metric b{font:700 13px ui-monospace,monospace;overflow-wrap:anywhere}.metric.good b,.good-text{color:var(--green)!important}.metric.bad b,.bad-text{color:var(--red)!important}.vote-list{margin-top:12px}.vote-list>div{display:grid;grid-template-columns:32px 1fr auto 50px;align-items:center;gap:9px;padding:10px 0;border-top:1px solid #192721}.vote-list p{display:flex;flex-direction:column;margin:0}.vote-list em{text-align:right;color:#9aa8a2;font:500 9px ui-monospace,monospace}.ai-consensus-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:13px}.ai-consensus-strip>div{background:#09130f;border:1px solid #182820;border-radius:7px;padding:10px;display:flex;flex-direction:column;gap:6px}.ai-consensus-strip span{color:var(--muted);font-size:8px}.ai-consensus-strip b{font:800 18px ui-monospace,monospace}.quorum-note{border-left:3px solid var(--amber);padding:8px 10px;color:#b9c5bf;font-size:9px;background:#111b17}.overview-bottom{grid-template-columns:1fr 1fr}.guard-list,.trade-flow{margin-top:12px}.guard-list>div,.trade-flow>div{display:grid;grid-template-columns:25px 1fr auto;align-items:center;padding:10px 0;border-top:1px solid #192721;font-size:11px}.guard-list i,.trade-flow i{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-style:normal}.guard-list i.ok,.trade-flow i.ok{background:#123126;color:var(--green)}.guard-list i.stop,.trade-flow i.stop{background:#3b171b;color:var(--red)}.guard-list b,.trade-flow b{font:600 9px ui-monospace,monospace;max-width:260px;text-align:right}.trade-flow{margin-bottom:12px}.performance-grid{margin:14px 0}.full{width:100%}.market-kpis{grid-template-columns:repeat(5,1fr);margin-bottom:12px}.market-layout{grid-template-columns:1.25fr .75fr}.table-wrap{overflow:auto;margin-top:12px}table{border-collapse:collapse;width:100%;min-width:650px}th,td{text-align:left;padding:11px 9px;border-top:1px solid #192721;font-size:11px}th{color:var(--muted);font:700 8px ui-monospace,monospace;text-transform:uppercase}.flow-list{margin-top:10px}.flow-list>div{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid #192721;font-size:11px}.flow-list b{font:600 10px ui-monospace,monospace}.regime-box{margin:14px 0;background:#151f1b;border:1px solid #26352f;padding:15px;border-radius:9px}.regime-box.risk_on{border-color:#245d4b}.regime-box.risk_off{border-color:#673039}.regime-box span{font:800 18px ui-monospace,monospace}.regime-box b{float:right;font:700 9px ui-monospace,monospace}.regime-box p{color:var(--muted);font-size:10px;line-height:1.5;margin:10px 0 0}.macro-assets{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.macro-assets>div,.news-score-row>div,.whale-grid>div{background:#09130f;border:1px solid #182820;border-radius:8px;padding:11px;display:flex;flex-direction:column;gap:5px}.macro-assets span,.news-score-row span{color:var(--muted);font-size:8px}.macro-assets b{font:700 13px ui-monospace,monospace}.macro-assets small{font:600 9px ui-monospace,monospace}.news-score-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:14px 0}.news-score-row b{font:700 20px ui-monospace,monospace}.headline-list>div{display:grid;grid-template-columns:24px 1fr;gap:8px;padding:10px 0;border-top:1px solid #192721}.headline-list>div>span{color:var(--green);font:600 9px ui-monospace,monospace}.headline-list p{display:flex;flex-direction:column;margin:0}.headline-list b{font-size:10px;line-height:1.35}.whale-panel{margin-top:12px}.whale-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:13px}.whale-grid b{font:800 14px ui-monospace,monospace}.whale-grid small{color:var(--muted);font-size:9px}.disclaimer,.desk-footer{color:var(--muted);font-size:9px}.trades-panel{margin-top:12px}.trade-head{display:flex;justify-content:space-between;gap:12px}.trade-head>div{display:flex;gap:7px}.empty{text-align:center;color:var(--muted);padding:28px;font-size:11px}.desk-footer{display:flex;justify-content:center;gap:20px;padding:24px 0 4px}
+.asset-direction{display:flex;justify-content:space-between;align-items:center;margin:0 0 9px;padding:8px;background:#09130f;border-radius:6px}.asset-direction span{color:var(--muted);font-size:8px;text-transform:uppercase}.asset-direction b,.candidate{font:800 9px ui-monospace,monospace}.asset-direction b.long,.candidate.long{color:var(--green)}.asset-direction b.short,.candidate.short{color:var(--red)}.asset-direction b.no-trade,.candidate.no-trade{color:#9aa8a2}.decision-badges{display:flex;gap:8px;align-items:center}.candidate{border:1px solid #2b3d36;border-radius:5px;padding:6px 8px}.readiness-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:13px}.readiness-grid>div{background:#09130f;border:1px solid #182820;border-radius:7px;padding:9px;display:grid;grid-template-columns:20px 1fr;align-items:center}.readiness-grid i{grid-row:1/3;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:9px}.readiness-grid i.ok{background:#123126;color:var(--green)}.readiness-grid i.stop{background:#3b171b;color:var(--red)}.readiness-grid span{font-size:8px;color:var(--muted)}.readiness-grid b{font:600 8px ui-monospace,monospace;overflow-wrap:anywhere}.readiness-panel{margin-bottom:12px}.ai-provider-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:10px}.ai-provider-grid>div,.learning-grid>div{background:#09130f;border:1px solid #182820;border-radius:7px;padding:10px;display:flex;flex-direction:column;gap:4px}.ai-provider-grid span,.learning-grid span{font-size:9px;color:var(--muted)}.ai-provider-grid b{font:700 8px ui-monospace,monospace}.ai-provider-grid small,.learning-grid small{color:#718078;font-size:8px}.engine-detail{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:13px}.learning-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:13px}.learning-grid b{font:800 18px ui-monospace,monospace}
+.probability-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:0 0 12px}.probability-grid>div{background:#09130f;border:1px solid #182820;border-radius:7px;padding:10px;display:flex;flex-direction:column;gap:6px}.probability-grid span{color:var(--muted);font-size:7px}.probability-grid b{font:800 17px ui-monospace,monospace}.blocker-list{background:#241416;border:1px solid #563037;border-radius:8px;padding:11px;margin-bottom:12px}.blocker-list>b{color:var(--red);font:800 9px ui-monospace,monospace}.blocker-list p{color:#f3b7b9;font-size:9px;margin:7px 0 0;line-height:1.35}
+@media(max-width:1100px){.status-strip{grid-template-columns:repeat(3,1fr)}.asset-grid{grid-template-columns:repeat(2,1fr)}.hero-grid,.market-layout,.intel-grid{grid-template-columns:1fr}.market-kpis{grid-template-columns:repeat(3,1fr)}.readiness-grid,.learning-grid{grid-template-columns:repeat(3,1fr)}.ai-provider-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:700px){.aegis-page{padding:15px}.aegis-header{align-items:flex-start;flex-direction:column}.aegis-header h1{font-size:27px}.status-strip{grid-template-columns:1fr 1fr}.asset-grid{grid-template-columns:1fr 1fr}.asset-card{padding:12px}.asset-card>strong{font-size:17px}.overview-bottom{grid-template-columns:1fr}.level-grid,.performance-grid,.market-kpis{grid-template-columns:1fr 1fr}.macro-assets,.whale-grid{grid-template-columns:1fr 1fr}.probability-grid{grid-template-columns:1fr 1fr}.decision-main{align-items:flex-start}.score-ring{width:88px}.trade-head{flex-direction:column}.desk-footer{flex-wrap:wrap;gap:8px}.header-actions{width:100%;justify-content:space-between}.readiness-grid,.learning-grid,.ai-provider-grid,.engine-detail{grid-template-columns:1fr 1fr}}
 `;

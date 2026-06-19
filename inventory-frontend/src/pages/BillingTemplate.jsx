@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { todayDate } from '../utils/storage';
 import { API_BASE, getInvoiceBusinessCategory, getInvoiceCategoryTotals, inferInvoiceItemCategory, isServiceText } from '../utils/api';
+import { printInvoiceElement } from '../utils/printInvoice';
 
 export default function VaishnavFinalInvoice() {
   const navigate = useNavigate();
@@ -142,11 +143,11 @@ export default function VaishnavFinalInvoice() {
   const qrSrc = qrImage || `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(qrData)}`;
 
   const handlePrint = () => {
-    setIsPrinting(true);
-    setTimeout(() => {
-      window.print();
-      setTimeout(() => setIsPrinting(false), 400);
-    }, 150);
+    try {
+      printInvoiceElement("vaishnav-print-sheet", `${billNo || "Vaishnav"} Premium Invoice`);
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   const createInvoicePdf = async () => {
@@ -472,18 +473,26 @@ export default function VaishnavFinalInvoice() {
   return (
     <div style={{ background: isPrinting ? '#ffffff' : '#f1f5f9', minHeight: '100vh', padding: isPrinting ? '0' : '30px 0', fontFamily: 'Arial, sans-serif', overflowY: isPrinting ? 'visible' : 'auto' }}>
       <style>{`
-        @page { size: A4; margin: 0; }
+        @page { size: A4 portrait; margin: 7mm; }
 
         @media print {
           html, body, #root {
-            width: 210mm !important;
-            min-height: 297mm !important;
+            width: 196mm !important;
+            min-height: 283mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
             overflow: visible !important;
           }
 
+          .app-shell, .app-content {
+            display: block !important;
+            width: 196mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .app-sidebar { display: none !important; }
           body * { visibility: hidden !important; }
 
           .invoice-print-sheet,
@@ -495,14 +504,24 @@ export default function VaishnavFinalInvoice() {
           }
 
           .invoice-print-sheet {
-            position: absolute !important;
+            position: fixed !important;
             left: 0 !important;
             top: 0 !important;
-            width: 210mm !important;
-            height: 297mm !important;
+            width: 196mm !important;
+            height: 283mm !important;
             margin: 0 !important;
             box-shadow: none !important;
+            border: 1mm double #0F2963 !important;
+            border-radius: 2mm !important;
+            padding: 7mm 9mm 6mm !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
+
+          .invoice-print-sheet table { page-break-inside: avoid !important; }
+          .invoice-print-sheet tr { page-break-inside: avoid !important; }
         }
       `}</style>
       
@@ -931,7 +950,7 @@ const styles = {
   panelInput: { padding: '8px 10px', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box', outline: 'none' },
   printActionBtn: { background: '#0F2963', color: '#FFF', border: 'none', padding: '8px 15px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
   insertRowBtn: { background: '#C49A45', color: '#FFF', border: 'none', padding: '8px 14px', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  a4SheetFramework: { width: '210mm', height: '297mm', backgroundColor: '#FFFFFF', padding: '10mm 14mm 8mm 14mm', boxSizing: 'border-box', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', position: 'relative', display: 'flex', flexDirection: 'column', margin: '0 auto' },
+  a4SheetFramework: { width: '210mm', height: '297mm', backgroundColor: '#FFFFFF', padding: '10mm 14mm 8mm 14mm', boxSizing: 'border-box', boxShadow: '0 10px 25px rgba(0,0,0,0.08)', border: '1.5px solid #0F2963', outline: '4px double #C49A45', outlineOffset: '-7px', position: 'relative', display: 'flex', flexDirection: 'column', margin: '0 auto' },
   screenBillSheet: { minHeight: '297mm', height: 'auto', overflow: 'visible', marginBottom: '50px' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '108px' },
   headerCenterText: { flexGrow: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' },

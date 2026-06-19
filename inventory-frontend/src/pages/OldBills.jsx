@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
+import { printInvoiceElement } from "../utils/printInvoice";
 
 function OldBills() {
   const navigate = useNavigate();
@@ -167,7 +168,11 @@ function OldBills() {
   }, [selectedInvoice]);
 
   const handlePrint = () => {
-    window.print();
+    try {
+      printInvoiceElement("old-bill-print-sheet", `${selectedInvoice?.invoiceNumber || "Vaishnav"} Premium Invoice`);
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   const handleDownloadPdf = async () => {
@@ -321,10 +326,29 @@ function OldBills() {
   return (
     <div style={pageStyle}>
       <style>{`
+        @page { size: A4 portrait; margin: 7mm; }
         @media print {
           .no-print { display: none !important; }
-          body { background: #fff !important; }
-          #old-bill-print-sheet { box-shadow: none !important; margin: 0 !important; }
+          html, body, #root { width: 196mm !important; min-height: 283mm !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+          .app-sidebar { display: none !important; }
+          .app-shell, .app-content { display: block !important; width: 196mm !important; margin: 0 !important; padding: 0 !important; }
+          body * { visibility: hidden !important; }
+          #old-bill-print-sheet, #old-bill-print-sheet * { visibility: visible !important; }
+          #old-bill-print-sheet {
+            position: fixed !important;
+            inset: 0 auto auto 0 !important;
+            width: 196mm !important;
+            min-height: 283mm !important;
+            margin: 0 !important;
+            padding: 10mm !important;
+            box-sizing: border-box !important;
+            border: 1mm double #0f2963 !important;
+            border-radius: 2mm !important;
+            box-shadow: inset 0 0 0 .4mm #c49a45 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          #old-bill-print-sheet table, #old-bill-print-sheet tr { page-break-inside: avoid !important; }
         }
       `}</style>
 
@@ -707,7 +731,7 @@ const returnReasonInput = { ...inputStyle, width: "100%", minHeight: "54px", box
 const smallNumberInput = { ...inputStyle, width: "95px", minWidth: "95px", padding: "8px" };
 const returnStatusText = { color: "#92400e", fontWeight: "900", marginTop: "4px" };
 const returnedText = { fontSize: "12px", color: "#92400e", marginTop: "5px", fontWeight: "900" };
-const sheetStyle = { width: "210mm", minHeight: "297mm", background: "white", margin: "0 auto", padding: "16mm", boxSizing: "border-box", boxShadow: "0 8px 24px rgba(0,0,0,0.08)", color: "#0f172a" };
+const sheetStyle = { width: "210mm", minHeight: "297mm", background: "white", margin: "0 auto", padding: "16mm", boxSizing: "border-box", border: "1.5px solid #0f2963", outline: "4px double #c49a45", outlineOffset: "-8px", boxShadow: "0 8px 24px rgba(0,0,0,0.08)", color: "#0f172a" };
 const sheetHeader = { display: "flex", justifyContent: "space-between", borderBottom: "3px solid #0f2963", paddingBottom: "14px", marginBottom: "18px" };
 const brandTitle = { color: "#0f2963", fontSize: "42px", fontWeight: "900", letterSpacing: "2px" };
 const brandSub = { color: "#9c742a", fontWeight: "900", letterSpacing: "1px" };

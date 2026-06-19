@@ -62,11 +62,12 @@ public class CryptoMarketDataService {
         return parseDouble(response.get("price"));
     }
 
-    public FuturesStats getFuturesStats(String symbol) {
+    public FuturesStats getFuturesStats(String symbol, double spotPrice) {
         FuturesStats stats = new FuturesStats();
         stats.symbol = symbol;
-        Map<?, ?> openInterest = safeFuturesMap("/fapi/v1/openInterest?symbol=" + symbol);
         Map<?, ?> premium = safeFuturesMap("/fapi/v1/premiumIndex?symbol=" + symbol);
+        if (premium.isEmpty()) return getBybitFuturesStats(symbol, spotPrice);
+        Map<?, ?> openInterest = safeFuturesMap("/fapi/v1/openInterest?symbol=" + symbol);
         Map<?, ?> ticker = safeFuturesMap("/fapi/v1/ticker/24hr?symbol=" + symbol);
 
         stats.openInterest = parseDouble(openInterest.get("openInterest"));
@@ -76,6 +77,8 @@ public class CryptoMarketDataService {
         stats.indexPrice = parseDouble(premium.get("indexPrice"));
         stats.priceChangePercent24h = parseDouble(ticker.get("priceChangePercent"));
         stats.quoteVolume24h = parseDouble(ticker.get("quoteVolume"));
+        stats.spotPrice = spotPrice;
+        stats.spotFuturesBasisPercent = spotPrice == 0 ? 0 : (stats.markPrice - spotPrice) * 100 / spotPrice;
 
         List<Map<String, Object>> oiHistory = safeFuturesList("/futures/data/openInterestHist?symbol=" + symbol + "&period=5m&limit=30");
         if (oiHistory.size() >= 2) {
@@ -96,9 +99,105 @@ public class CryptoMarketDataService {
         List<Map<String, Object>> taker = safeFuturesList("/futures/data/takerlongshortRatio?symbol=" + symbol + "&period=5m&limit=1");
         if (!taker.isEmpty()) stats.takerBuySellRatio = parseDouble(taker.get(taker.size() - 1).get("buySellRatio"));
 
-        populateLargeTradeFlow(stats, symbol);
+        populateOrderBook(stats, symbol);
+        populateTradeFlow(stats, symbol);
         stats.fetchedAt = System.currentTimeMillis();
         return stats;
+    }
+
+    private FuturesStats getBybitFuturesStats(String symbol, double spotPrice) {
+        FuturesStats stats = new FuturesStats();
+        stats.symbol = symbol;
+        stats.spotPrice = spotPrice;
+        try {
+            Map<?, ?> tickerRoot = restTemplate.getForObject(
+                    "https://api.bybit.com/v5/market/tickers?category=linear&symbol=" + symbol, Map.class);
+            Map<?, ?> ticker = firstBybitResult(tickerRoot);
+            if (ticker.isEmpty()) return stats;
+            stats.openInterest = parseDouble(ticker.get("openInterest"));
+            stats.openInterestValue = parseDouble(ticker.get("openInterestValue"));
+            stats.fundingRate = parseDouble(ticker.get("fundingRate"));
+            stats.nextFundingTime = parseLong(ticker.get("nextFundingTime"));
+            stats.markPrice = parseDouble(ticker.get("markPrice"));
+            stats.indexPrice = parseDouble(ticker.get("indexPrice"));
+            stats.priceChangePercent24h = parseDouble(ticker.get("price24hPcnt")) * 100;
+            stats.quoteVolume24h = parseDouble(ticker.get("turnover24h"));
+            stats.spotFuturesBasisPercent = spotPrice == 0 ? 0 : (stats.markPrice - spotPrice) * 100 / spotPrice;
+
+            Map<?, ?> depthRoot = restTemplate.getForObject(
+                    "https://api.bybit.com/v5/market/orderbook?category=linear&symbol=" + symbol + "&limit=50", Map.class);
+            Map<?, ?> depth = bybitResult(depthRoot);
+            stats.bidDepthNotional = depthNotional(depth.get("b"));
+            stats.askDepthNotional = depthNotional(depth.get("a"));
+            double depthTotal = stats.bidDepthNotional + stats.askDepthNotional;
+            stats.orderBookImbalancePercent = depthTotal == 0 ? 0 :
+                    (stats.bidDepthNotional - stats.askDepthNotional) * 100 / depthTotal;
+
+            Map<?, ?> oiRoot = restTemplate.getForObject(
+                    "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=" + symbol + "&intervalTime=5min&limit=30", Map.class);
+            List<Map<String, Object>> oiRows = bybitResultList(oiRoot);
+            if (oiRows.size() >= 2) {
+                double latest = parseDouble(oiRows.get(0).get("openInterest"));
+                double oldest = parseDouble(oiRows.get(oiRows.size() - 1).get("openInterest"));
+                stats.openInterestChangePercent = oldest == 0 ? 0 : (latest - oldest) * 100 / oldest;
+            }
+
+            Map<?, ?> ratioRoot = restTemplate.getForObject(
+                    "https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=" + symbol + "&period=5min&limit=1", Map.class);
+            List<Map<String, Object>> ratioRows = bybitResultList(ratioRoot);
+            if (!ratioRows.isEmpty()) {
+                stats.longAccount = parseDouble(ratioRows.get(0).get("buyRatio"));
+                stats.shortAccount = parseDouble(ratioRows.get(0).get("sellRatio"));
+                stats.longShortRatio = stats.shortAccount == 0 ? 0 : stats.longAccount / stats.shortAccount;
+            }
+
+            Map<?, ?> tradesRoot = restTemplate.getForObject(
+                    "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=" + symbol + "&limit=1000", Map.class);
+            populateBybitTradeFlow(stats, bybitResultList(tradesRoot));
+            stats.fetchedAt = System.currentTimeMillis();
+            lastFuturesSource = "BYBIT_PUBLIC_LINEAR_FALLBACK";
+        } catch (Exception ignored) {
+            lastFuturesSource = "FUTURES_UNAVAILABLE_BINANCE_AND_BYBIT";
+        }
+        return stats;
+    }
+
+    private Map<?, ?> bybitResult(Map<?, ?> root) {
+        if (root == null || parseLong(root.get("retCode")) != 0 || !(root.get("result") instanceof Map<?, ?> result)) return Map.of();
+        return result;
+    }
+
+    private Map<?, ?> firstBybitResult(Map<?, ?> root) {
+        Map<?, ?> result = bybitResult(root);
+        Object raw = result.get("list");
+        if (raw instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Map<?, ?> row) return row;
+        return Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> bybitResultList(Map<?, ?> root) {
+        Object raw = bybitResult(root).get("list");
+        if (!(raw instanceof List<?> rows)) return List.of();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object row : rows) if (row instanceof Map<?, ?> map) result.add((Map<String, Object>) map);
+        return result;
+    }
+
+    private void populateBybitTradeFlow(FuturesStats stats, List<Map<String, Object>> trades) {
+        double threshold = Math.max(50_000, stats.quoteVolume24h * 0.00001);
+        stats.largeTradeThreshold = threshold;
+        for (Map<String, Object> trade : trades) {
+            double notional = parseDouble(trade.get("price")) * parseDouble(trade.get("size"));
+            boolean buy = "Buy".equalsIgnoreCase(String.valueOf(trade.get("side")));
+            if (buy) { stats.takerBuyNotional += notional; stats.cvd += notional; }
+            else { stats.takerSellNotional += notional; stats.cvd -= notional; }
+            if (notional < threshold) continue;
+            if (buy) stats.largeBuyNotional += notional; else stats.largeSellNotional += notional;
+            stats.largeTradeCount++;
+        }
+        stats.takerBuySellRatio = stats.takerSellNotional == 0 ? 0 : stats.takerBuyNotional / stats.takerSellNotional;
+        stats.largeTradeBias = stats.largeBuyNotional > stats.largeSellNotional ? "BUY" :
+                stats.largeSellNotional > stats.largeBuyNotional ? "SELL" : "NEUTRAL";
     }
 
     public Map<String, Object> getFearGreed() {
@@ -116,16 +215,40 @@ public class CryptoMarketDataService {
         );
     }
 
-    private void populateLargeTradeFlow(FuturesStats stats, String symbol) {
+    private void populateOrderBook(FuturesStats stats, String symbol) {
+        Map<?, ?> depth = safeFuturesMap("/fapi/v1/depth?symbol=" + symbol + "&limit=20");
+        stats.bidDepthNotional = depthNotional(depth.get("bids"));
+        stats.askDepthNotional = depthNotional(depth.get("asks"));
+        double total = stats.bidDepthNotional + stats.askDepthNotional;
+        stats.orderBookImbalancePercent = total == 0 ? 0 : (stats.bidDepthNotional - stats.askDepthNotional) * 100 / total;
+    }
+
+    private double depthNotional(Object raw) {
+        if (!(raw instanceof List<?> rows)) return 0;
+        double total = 0;
+        for (Object item : rows) {
+            if (!(item instanceof List<?> row) || row.size() < 2) continue;
+            total += parseDouble(row.get(0)) * parseDouble(row.get(1));
+        }
+        return total;
+    }
+
+    private void populateTradeFlow(FuturesStats stats, String symbol) {
         List<Map<String, Object>> trades = safeFuturesList("/fapi/v1/aggTrades?symbol=" + symbol + "&limit=1000");
         double threshold = Math.max(50_000, stats.quoteVolume24h * 0.00001);
         stats.largeTradeThreshold = threshold;
         for (Map<String, Object> trade : trades) {
             double notional = parseDouble(trade.get("p")) * parseDouble(trade.get("q"));
-            if (notional < threshold) continue;
             boolean buyerWasMaker = Boolean.parseBoolean(String.valueOf(trade.get("m")));
-            if (buyerWasMaker) stats.largeSellNotional += notional;
-            else stats.largeBuyNotional += notional;
+            if (buyerWasMaker) {
+                stats.takerSellNotional += notional;
+                stats.cvd -= notional;
+            } else {
+                stats.takerBuyNotional += notional;
+                stats.cvd += notional;
+            }
+            if (notional < threshold) continue;
+            if (buyerWasMaker) stats.largeSellNotional += notional; else stats.largeBuyNotional += notional;
             stats.largeTradeCount++;
         }
         stats.largeTradeBias = stats.largeBuyNotional > stats.largeSellNotional ? "BUY" : stats.largeSellNotional > stats.largeBuyNotional ? "SELL" : "NEUTRAL";
@@ -229,6 +352,14 @@ public class CryptoMarketDataService {
         public double indexPrice;
         public double priceChangePercent24h;
         public double quoteVolume24h;
+        public double spotPrice;
+        public double spotFuturesBasisPercent;
+        public double bidDepthNotional;
+        public double askDepthNotional;
+        public double orderBookImbalancePercent;
+        public double takerBuyNotional;
+        public double takerSellNotional;
+        public double cvd;
         public double longShortRatio;
         public double longAccount;
         public double shortAccount;
