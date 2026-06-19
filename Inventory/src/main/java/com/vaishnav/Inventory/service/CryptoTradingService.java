@@ -55,9 +55,10 @@ public class CryptoTradingService {
     @Autowired
     private CryptoOnChainService onChainService;
 
+
     public Map<String, Object> getDashboard() {
         Map<String, Object> response = new LinkedHashMap<>();
-        List<Map<String, Object>> signals = SYMBOLS.parallelStream()
+        List<Map<String, Object>> signals = SYMBOLS.stream()
                 .map(this::buildSignal)
                 .toList();
 
@@ -281,7 +282,7 @@ public class CryptoTradingService {
                     ? livePrice + atr * 0.55
                     : livePrice - atr * 0.55;
 
-            boolean aligned = longCount == 3 || shortCount == 3;
+            boolean aligned = longCount >= 2 || shortCount >= 2;
             boolean fundingRisk = Math.abs(futures.fundingRate) >= 0.001;
             boolean futuresAvailable = futures.openInterest > 0 || futures.markPrice > 0;
             int derivativesLongScore = derivativesScore("LONG", futures);
@@ -458,7 +459,7 @@ public class CryptoTradingService {
 
             map.put("aiVotes", aiConsensus.get("votes"));
             map.put("aiConsensus", aiConsensus);
-            map.put("bestAi", aiQuorumReady ? "Multi-provider AI consensus" : "No AI quorum (minimum 2 live providers)");
+            map.put("bestAi", aiQuorumReady ? "Adaptive multi-provider AI consensus" : "No AI quorum (any 2 live providers required)");
             map.put("indicatorSummary", Map.of(
                     "total", Math.round(toDouble(a15.get("indicatorCount")) + toDouble(a1h.get("indicatorCount")) + toDouble(a4h.get("indicatorCount"))),
                     "perTimeframe", a15.get("indicatorCount"),

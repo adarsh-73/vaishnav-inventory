@@ -16,13 +16,14 @@ import java.time.Instant;
 @Service
 public class CryptoAiConsensusService {
 
-    private static final long CACHE_MS = 10 * 60 * 1000L;
+    private static final long CACHE_MS = 4 * 60 * 1000L;
     private static final int MIN_LIVE_PROVIDERS = 2;
     private static final String INSTRUCTIONS = "You are a conservative crypto paper-trading risk reviewer. Analyze every supplied engine: market microstructure, technical timeframes, derivatives, liquidations, macro, published news, attributed whales, on-chain metrics, risk policy, and data readiness. Never invent missing data. Return strict JSON with signal LONG, SHORT, or NO_TRADE; confidence 0-100; horizon SCALP, INTRADAY, or SWING; short reason; riskFlags array; and dataGaps array. Prefer NO_TRADE when mandatory data is missing or evidence conflicts. The deterministic risk engine has final authority.";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate;
     private final Map<String, CachedConsensus> cache = new ConcurrentHashMap<>();
+    private final Map<String, ProviderHealth> providerHealth = new ConcurrentHashMap<>();
 
     @Value("${OPENAI_API_KEY:}") private String openAiKey;
     @Value("${OPENAI_MODEL:gpt-5.5}") private String openAiModel;
@@ -73,7 +74,7 @@ public class CryptoAiConsensusService {
         long noTrades = liveVotes.size() - longs - shorts;
         String majoritySignal = longs > shorts && longs > noTrades ? "LONG" : shorts > longs && shorts > noTrades ? "SHORT" : "NO_TRADE";
         boolean geminiLive = liveVotes.stream().anyMatch(v -> "Gemini".equals(v.get("ai")));
-        boolean quorumReady = liveVotes.size() >= MIN_LIVE_PROVIDERS && geminiLive;
+        boolean quorumReady = liveVotes.size() >= MIN_LIVE_PROVIDERS;
         String consensus = quorumReady ? majoritySignal : "NO_TRADE";
         double confidence = liveVotes.stream()
                 .filter(v -> majoritySignal.equals(v.get("signal")))
@@ -92,10 +93,10 @@ public class CryptoAiConsensusService {
         result.put("configuredProviders", liveVotes.size());
         result.put("liveProviders", liveVotes.size());
         result.put("requiredForConsensus", MIN_LIVE_PROVIDERS);
-        result.put("geminiRequired", true);
+        result.put("geminiRequired", false);
         result.put("geminiLive", geminiLive);
         result.put("quorumReady", quorumReady);
-        result.put("consensusStatus", quorumReady ? "READY" : geminiLive ? "NEED_ONE_MORE_LIVE_AI" : "GEMINI_NOT_LIVE");
+        result.put("consensusStatus", quorumReady ? "READY" : "NEED_TWO_LIVE_AI");
         result.put("longVotePercent", Math.round(longs * 100.0 / voteTotal));
         result.put("shortVotePercent", Math.round(shorts * 100.0 / voteTotal));
         result.put("noTradeVotePercent", Math.round(noTrades * 100.0 / voteTotal));
@@ -114,13 +115,13 @@ public class CryptoAiConsensusService {
 
     public Map<String, Object> providerStatus() {
         Map<String, Object> status = new LinkedHashMap<>();
-        status.put("OpenAI", providerConfig(!openAiKey.isBlank(), openAiModel, "OPENAI_API_KEY"));
-        status.put("Gemini", providerConfig(!geminiKey.isBlank(), geminiModel, "GEMINI_API_KEY / GOOGLE_API_KEY"));
-        status.put("Claude", providerConfig(!anthropicKey.isBlank(), anthropicModel, "ANTHROPIC_API_KEY"));
-        status.put("DeepSeek", providerConfig(!deepSeekKey.isBlank(), deepSeekModel, "DEEPSEEK_API_KEY"));
-        status.put("Groq", providerConfig(!groqKey.isBlank(), groqModel, "GROQ_API_KEY"));
-        status.put("Cerebras", providerConfig(!cerebrasKey.isBlank(), cerebrasModel, "CEREBRAS_API_KEY"));
-        status.put("Mistral", providerConfig(!mistralKey.isBlank(), mistralModel, "MISTRAL_API_KEY"));
+        status.put("OpenAI", providerConfig("ChatGPT", !openAiKey.isBlank(), openAiModel, "OPENAI_API_KEY"));
+        status.put("Gemini", providerConfig("Gemini", !geminiKey.isBlank(), geminiModel, "GEMINI_API_KEY / GOOGLE_API_KEY"));
+        status.put("Claude", providerConfig("Claude", !anthropicKey.isBlank(), anthropicModel, "ANTHROPIC_API_KEY"));
+        status.put("DeepSeek", providerConfig("DeepSeek", !deepSeekKey.isBlank(), deepSeekModel, "DEEPSEEK_API_KEY"));
+        status.put("Groq", providerConfig("Groq Llama", !groqKey.isBlank(), groqModel, "GROQ_API_KEY"));
+        status.put("Cerebras", providerConfig("Cerebras GPT-OSS", !cerebrasKey.isBlank(), cerebrasModel, "CEREBRAS_API_KEY"));
+        status.put("Mistral", providerConfig("Mistral", !mistralKey.isBlank(), mistralModel, "MISTRAL_API_KEY"));
         return status;
     }
 
@@ -140,11 +141,22 @@ public class CryptoAiConsensusService {
         return result;
     }
 
-    private Map<String, Object> providerConfig(boolean configured, String model, String keyName) {
-        return Map.of("configured", configured, "model", model, "requiredEnvironmentVariable", keyName);
+    private Map<String, Object> providerConfig(String provider, boolean configured, String model, String keyName) {
+        ProviderHealth health = providerHealth.get(provider);
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("configured", configured);
+        value.put("model", model);
+        value.put("requiredEnvironmentVariable", keyName);
+        value.put("runtimeStatus", !configured ? "NOT_CONFIGURED" : health == null ? "NOT_TESTED" : health.status);
+        value.put("lastCheckedAt", health == null ? null : health.checkedAt);
+        value.put("lastError", health == null ? "" : health.error);
+        value.put("cooldownUntil", health == null || health.cooldownUntil <= System.currentTimeMillis() ? null : Instant.ofEpochMilli(health.cooldownUntil).toString());
+        return value;
     }
 
     private Map<String, Object> callOpenAi(String prompt) {
+        Map<String, Object> cooldown = cooldownVote("ChatGPT", openAiModel);
+        if (cooldown != null) return cooldown;
         try {
             HttpHeaders headers = jsonHeaders();
             headers.setBearerAuth(openAiKey);
@@ -185,6 +197,8 @@ public class CryptoAiConsensusService {
     }
 
     private Map<String, Object> callGemini(String prompt) {
+        Map<String, Object> cooldown = cooldownVote("Gemini", geminiModel);
+        if (cooldown != null) return cooldown;
         try {
             HttpHeaders headers = jsonHeaders();
             headers.set("x-goog-api-key", geminiKey);
@@ -202,6 +216,8 @@ public class CryptoAiConsensusService {
     }
 
     private Map<String, Object> callAnthropic(String prompt) {
+        Map<String, Object> cooldown = cooldownVote("Claude", anthropicModel);
+        if (cooldown != null) return cooldown;
         try {
             HttpHeaders headers = jsonHeaders();
             headers.set("x-api-key", anthropicKey);
@@ -221,6 +237,8 @@ public class CryptoAiConsensusService {
     }
 
     private Map<String, Object> callDeepSeek(String prompt) {
+        Map<String, Object> cooldown = cooldownVote("DeepSeek", deepSeekModel);
+        if (cooldown != null) return cooldown;
         try {
             HttpHeaders headers = jsonHeaders();
             headers.setBearerAuth(deepSeekKey);
@@ -240,6 +258,8 @@ public class CryptoAiConsensusService {
     }
 
     private Map<String, Object> callOpenAiCompatible(String provider, String model, String apiKey, String url, String prompt) {
+        Map<String, Object> cooldown = cooldownVote(provider, model);
+        if (cooldown != null) return cooldown;
         try {
             HttpHeaders headers = jsonHeaders();
             headers.setBearerAuth(apiKey);
@@ -284,6 +304,7 @@ public class CryptoAiConsensusService {
         vote.put("horizon", String.valueOf(parsed.getOrDefault("horizon", "INTRADAY")));
         vote.put("riskFlags", parsed.getOrDefault("riskFlags", List.of()));
         vote.put("dataGaps", parsed.getOrDefault("dataGaps", List.of()));
+        providerHealth.put(provider, new ProviderHealth("LIVE", Instant.now().toString(), "", 0));
         return vote;
     }
 
@@ -294,7 +315,20 @@ public class CryptoAiConsensusService {
     private Map<String, Object> providerError(String provider, String model, Exception error) {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         if (message.length() > 180) message = message.substring(0, 180);
+        long cooldownMs = message.contains("429") || message.toLowerCase(Locale.ROOT).contains("too many requests")
+                ? 10 * 60 * 1000L : 60 * 1000L;
+        providerHealth.put(provider, new ProviderHealth("ERROR", Instant.now().toString(), message, System.currentTimeMillis() + cooldownMs));
         return Map.of("ai", provider, "model", model, "status", "ERROR", "verification", "API_CALL_FAILED", "signal", "NO_VOTE", "confidence", 0, "reason", message);
+    }
+
+    private Map<String, Object> cooldownVote(String provider, String model) {
+        ProviderHealth health = providerHealth.get(provider);
+        if (health == null || health.cooldownUntil <= System.currentTimeMillis()) return null;
+        return Map.of(
+                "ai", provider, "model", model, "status", "COOLDOWN", "verification", "API_CALL_DEFERRED",
+                "signal", "NO_VOTE", "confidence", 0,
+                "reason", "Temporary provider cooldown until " + Instant.ofEpochMilli(health.cooldownUntil)
+        );
     }
 
     private HttpHeaders jsonHeaders() {
@@ -309,4 +343,5 @@ public class CryptoAiConsensusService {
     }
 
     private record CachedConsensus(long createdAt, Map<String, Object> value) {}
+    private record ProviderHealth(String status, String checkedAt, String error, long cooldownUntil) {}
 }
