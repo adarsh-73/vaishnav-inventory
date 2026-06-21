@@ -208,6 +208,7 @@ public class CryptoMarketDataService {
                         (stats.bidDepthNotional - stats.askDepthNotional) * 100 / total;
             }
             stats.fetchedAt = System.currentTimeMillis();
+            if (stats.takerBuyNotional <= 0 && stats.takerSellNotional <= 0) populateSpotTradeFlow(stats, symbol);
             lastFuturesSource = "HYPERLIQUID_PUBLIC_PERPETUAL_FALLBACK";
         } catch (Exception ignored) {
             lastFuturesSource = "FUTURES_UNAVAILABLE_BINANCE_BYBIT_HYPERLIQUID";
@@ -287,6 +288,31 @@ public class CryptoMarketDataService {
         stats.takerBuySellRatio = stats.takerSellNotional == 0 ? 0 : stats.takerBuyNotional / stats.takerSellNotional;
         stats.largeTradeBias = stats.largeBuyNotional > stats.largeSellNotional ? "BUY" :
                 stats.largeSellNotional > stats.largeBuyNotional ? "SELL" : "NEUTRAL";
+        stats.largeTradeSource = "BYBIT_PUBLIC_RECENT_TRADES";
+    }
+
+    private void populateSpotTradeFlow(FuturesStats stats, String symbol) {
+        try {
+            Object[] rawTrades = getSpot("/api/v3/aggTrades?symbol=" + symbol + "&limit=1000", Object[].class);
+            double threshold = Math.max(25_000, stats.quoteVolume24h * 0.000005);
+            stats.largeTradeThreshold = threshold;
+            for (Object raw : rawTrades) {
+                if (!(raw instanceof Map<?, ?> trade)) continue;
+                double notional = parseDouble(trade.get("p")) * parseDouble(trade.get("q"));
+                boolean buyerWasMaker = Boolean.parseBoolean(String.valueOf(trade.get("m")));
+                if (buyerWasMaker) { stats.takerSellNotional += notional; stats.cvd -= notional; }
+                else { stats.takerBuyNotional += notional; stats.cvd += notional; }
+                if (notional < threshold) continue;
+                if (buyerWasMaker) stats.largeSellNotional += notional; else stats.largeBuyNotional += notional;
+                stats.largeTradeCount++;
+            }
+            stats.takerBuySellRatio = stats.takerSellNotional == 0 ? 0 : stats.takerBuyNotional / stats.takerSellNotional;
+            stats.largeTradeBias = stats.largeBuyNotional > stats.largeSellNotional ? "BUY" :
+                    stats.largeSellNotional > stats.largeBuyNotional ? "SELL" : "NEUTRAL";
+            stats.largeTradeSource = "BINANCE_SPOT_AGG_TRADES_REAL";
+        } catch (Exception ignored) {
+            stats.largeTradeSource = "UNAVAILABLE";
+        }
     }
 
     public Map<String, Object> getFearGreed() {
@@ -341,6 +367,7 @@ public class CryptoMarketDataService {
             stats.largeTradeCount++;
         }
         stats.largeTradeBias = stats.largeBuyNotional > stats.largeSellNotional ? "BUY" : stats.largeSellNotional > stats.largeBuyNotional ? "SELL" : "NEUTRAL";
+        stats.largeTradeSource = "BINANCE_FUTURES_AGG_TRADES_REAL";
     }
 
     @SuppressWarnings("unchecked")
@@ -458,6 +485,7 @@ public class CryptoMarketDataService {
         public int largeTradeCount;
         public double largeTradeThreshold;
         public String largeTradeBias = "NEUTRAL";
+        public String largeTradeSource = "UNAVAILABLE";
         public long fetchedAt;
     }
 }

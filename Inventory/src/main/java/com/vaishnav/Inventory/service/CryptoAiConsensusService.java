@@ -202,10 +202,27 @@ public class CryptoAiConsensusService {
         try {
             HttpHeaders headers = jsonHeaders();
             headers.set("x-goog-api-key", geminiKey);
+            Map<String, Object> responseSchema = Map.of(
+                    "type", "OBJECT",
+                    "properties", Map.of(
+                            "signal", Map.of("type", "STRING", "enum", List.of("LONG", "SHORT", "NO_TRADE")),
+                            "confidence", Map.of("type", "NUMBER", "minimum", 0, "maximum", 100),
+                            "horizon", Map.of("type", "STRING", "enum", List.of("SCALP", "INTRADAY", "SWING")),
+                            "reason", Map.of("type", "STRING"),
+                            "riskFlags", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                            "dataGaps", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                    ),
+                    "required", List.of("signal", "confidence", "horizon", "reason", "riskFlags", "dataGaps")
+            );
             Map<String, Object> body = Map.of(
                     "system_instruction", Map.of("parts", List.of(Map.of("text", INSTRUCTIONS))),
                     "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt)))),
-                    "generationConfig", Map.of("responseMimeType", "application/json", "maxOutputTokens", 250)
+                    "generationConfig", Map.of(
+                            "responseMimeType", "application/json",
+                            "responseSchema", responseSchema,
+                            "maxOutputTokens", 800,
+                            "temperature", 0.1
+                    )
             );
             JsonNode root = exchange("https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent", headers, body);
             String text = root.path("candidates").path(0).path("content").path("parts").path(0).path("text").asText();

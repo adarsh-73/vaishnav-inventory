@@ -468,6 +468,7 @@ public class CryptoTradingService {
             futuresData.put("largeTradeCount", futures.largeTradeCount);
             futuresData.put("largeTradeThreshold", futures.largeTradeThreshold);
             futuresData.put("largeTradeBias", futures.largeTradeBias);
+            futuresData.put("largeTradeSource", futures.largeTradeSource);
             futuresData.put("derivativesScore", derivativesScore);
             futuresData.put("fetchedAt", futures.fetchedAt);
             futuresData.put("source", marketDataService.getFuturesSource());
@@ -479,7 +480,7 @@ public class CryptoTradingService {
                     "buyNotional", futures.largeBuyNotional,
                     "sellNotional", futures.largeSellNotional,
                     "bias", futures.largeTradeBias,
-                    "source", marketDataService.getFuturesSource(),
+                    "source", futures.largeTradeSource,
                     "onChain", false
             ));
             map.put("whaleData", whaleSnapshot);
