@@ -1,6 +1,7 @@
 package com.vaishnav.Inventory.service;
 
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.w3c.dom.Document;
@@ -112,7 +113,7 @@ public class CryptoMacroNewsService {
                 "TheBlock", "API_OR_LICENSE_REQUIRED",
                 "GDELT", gdelt.isEmpty() ? "UNAVAILABLE" : "LIVE"
         ));
-        context.put("macroSource", "YAHOO_FINANCE_PUBLIC_CHART");
+        context.put("macroSource", "YAHOO_FINANCE_OR_NASDAQ_ETF_PROXY");
         context.put("fetchedAt", System.currentTimeMillis());
         context.put("futureNewsDisclaimer", "Unknown breaking news cannot be predicted; only published headlines and scheduled-event feeds can be checked.");
         cached = context;
@@ -133,8 +134,53 @@ public class CryptoMacroNewsService {
             double change = previous == 0 ? 0 : (current - previous) * 100 / previous;
             return Map.of("status", "LIVE", "price", current, "changePercent", change);
         } catch (Exception ignored) {
+            return nasdaqMacroProxy(symbol);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> nasdaqMacroProxy(String yahooSymbol) {
+        String proxy = switch (yahooSymbol) {
+            case "%5EGSPC" -> "SPY";
+            case "%5EIXIC" -> "QQQ";
+            case "DX-Y.NYB" -> "UUP";
+            case "%5ETNX" -> "IEF";
+            case "GC%3DF" -> "GLD";
+            case "CL%3DF" -> "USO";
+            case "%5EVIX" -> "VXX";
+            default -> "";
+        };
+        if (proxy.isBlank()) return Map.of("status", "UNAVAILABLE", "price", 0, "changePercent", 0);
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(HttpHeaders.USER_AGENT, "Mozilla/5.0 (compatible; VaishnavAegis/1.0)");
+            Map<String, Object> root = restTemplate.exchange(
+                    "https://api.nasdaq.com/api/quote/" + proxy + "/info?assetclass=etf",
+                    HttpMethod.GET, new HttpEntity<>(headers), Map.class).getBody();
+            if (root == null || !(root.get("data") instanceof Map<?, ?> data)
+                    || !(data.get("primaryData") instanceof Map<?, ?> primary)) {
+                return Map.of("status", "UNAVAILABLE", "price", 0, "changePercent", 0);
+            }
+            double price = parseMarketNumber(primary.get("lastSalePrice"));
+            double change = parseMarketNumber(primary.get("percentageChange"));
+            if ("%5ETNX".equals(yahooSymbol)) change = -change;
+            if (price <= 0) return Map.of("status", "UNAVAILABLE", "price", 0, "changePercent", 0);
+            return Map.of(
+                    "status", "LIVE_PROXY",
+                    "price", price,
+                    "changePercent", change,
+                    "proxySymbol", proxy,
+                    "source", "NASDAQ_PUBLIC_ETF_PROXY"
+            );
+        } catch (Exception ignored) {
             return Map.of("status", "UNAVAILABLE", "price", 0, "changePercent", 0);
         }
+    }
+
+    private double parseMarketNumber(Object raw) {
+        if (raw == null) return 0;
+        String cleaned = String.valueOf(raw).replaceAll("[^0-9+\\-.]", "");
+        try { return Double.parseDouble(cleaned); } catch (Exception ignored) { return 0; }
     }
 
     @SuppressWarnings("unchecked")

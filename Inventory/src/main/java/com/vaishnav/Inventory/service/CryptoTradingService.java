@@ -479,7 +479,7 @@ public class CryptoTradingService {
                     "buyNotional", futures.largeBuyNotional,
                     "sellNotional", futures.largeSellNotional,
                     "bias", futures.largeTradeBias,
-                    "source", "BINANCE_AGG_TRADES_REAL",
+                    "source", marketDataService.getFuturesSource(),
                     "onChain", false
             ));
             map.put("whaleData", whaleSnapshot);
@@ -647,7 +647,7 @@ public class CryptoTradingService {
         int live = 0;
         for (String key : List.of("sp500", "nasdaq", "dxy", "us10y", "gold", "oil", "vix")) {
             Object raw = macro.get(key);
-            if (raw instanceof Map<?, ?> value && "LIVE".equals(value.get("status"))) live++;
+            if (raw instanceof Map<?, ?> value && String.valueOf(value.get("status")).startsWith("LIVE")) live++;
         }
         return live >= 5;
     }

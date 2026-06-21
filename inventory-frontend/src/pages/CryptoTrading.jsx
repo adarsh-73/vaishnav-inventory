@@ -113,7 +113,7 @@ function PanelHead({label,right}){return <div className="panel-head"><span>{labe
 function Signal({signal,large}){const normalized=signal==="LONG"||signal==="SHORT"?signal:"NO_TRADE";return <span className={`signal ${signalClass(normalized)} ${large?"large":""}`}>{normalized.replace("_"," ")}</span>}
 function Guard({ok,label,value}){return <div><i className={ok?"ok":"stop"}>{ok?"✓":"!"}</i><span>{label}</span><b>{value}</b></div>}
 function Flow({label,value,tone}){return <div><span>{label}</span><b className={tone==="good"?"good-text":tone==="bad"?"bad-text":""}>{value}</b></div>}
-function MacroAsset({label,data}){const change=Number(data?.changePercent||0);return <div><span>{label}</span><b>{data?.status==="LIVE"?number(data.price,2):"—"}</b><small className={change>=0?"good-text":"bad-text"}>{data?.status==="LIVE"?percent(change):"Unavailable"}</small></div>}
+function MacroAsset({label,data}){const change=Number(data?.changePercent||0),live=String(data?.status||"").startsWith("LIVE");return <div><span>{label}{data?.proxySymbol?` · ${data.proxySymbol} proxy`:""}</span><b>{live?number(data.price,2):"—"}</b><small className={change>=0?"good-text":"bad-text"}>{live?percent(change):"Unavailable"}</small></div>}
 function Empty({text}){return <div className="empty">{text}</div>}
 function signalClass(signal){return signal==="LONG"?"long":signal==="SHORT"?"short":"no-trade"}
 function pretty(v){return String(v||"").replaceAll("_"," ")}

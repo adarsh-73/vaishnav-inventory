@@ -20,6 +20,11 @@ public class CryptoMarketDataService {
             "https://fapi1.binance.com",
             "https://fapi2.binance.com"
     );
+    private static final List<String> BYBIT_BASES = List.of(
+            "https://api.bybit.com",
+            "https://api.bytick.com",
+            "https://api.bybitglobal.com"
+    );
 
     private final RestTemplate restTemplate;
     private volatile String lastSpotSource = "BINANCE_NOT_FETCHED";
@@ -110,8 +115,7 @@ public class CryptoMarketDataService {
         stats.symbol = symbol;
         stats.spotPrice = spotPrice;
         try {
-            Map<?, ?> tickerRoot = restTemplate.getForObject(
-                    "https://api.bybit.com/v5/market/tickers?category=linear&symbol=" + symbol, Map.class);
+            Map<?, ?> tickerRoot = safeBybitRoot("/v5/market/tickers?category=linear&symbol=" + symbol);
             Map<?, ?> ticker = firstBybitResult(tickerRoot);
             if (ticker.isEmpty()) return stats;
             stats.openInterest = parseDouble(ticker.get("openInterest"));
@@ -124,8 +128,7 @@ public class CryptoMarketDataService {
             stats.quoteVolume24h = parseDouble(ticker.get("turnover24h"));
             stats.spotFuturesBasisPercent = spotPrice == 0 ? 0 : (stats.markPrice - spotPrice) * 100 / spotPrice;
 
-            Map<?, ?> depthRoot = restTemplate.getForObject(
-                    "https://api.bybit.com/v5/market/orderbook?category=linear&symbol=" + symbol + "&limit=50", Map.class);
+            Map<?, ?> depthRoot = safeBybitRoot("/v5/market/orderbook?category=linear&symbol=" + symbol + "&limit=50");
             Map<?, ?> depth = bybitResult(depthRoot);
             stats.bidDepthNotional = depthNotional(depth.get("b"));
             stats.askDepthNotional = depthNotional(depth.get("a"));
@@ -133,8 +136,7 @@ public class CryptoMarketDataService {
             stats.orderBookImbalancePercent = depthTotal == 0 ? 0 :
                     (stats.bidDepthNotional - stats.askDepthNotional) * 100 / depthTotal;
 
-            Map<?, ?> oiRoot = restTemplate.getForObject(
-                    "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=" + symbol + "&intervalTime=5min&limit=30", Map.class);
+            Map<?, ?> oiRoot = safeBybitRoot("/v5/market/open-interest?category=linear&symbol=" + symbol + "&intervalTime=5min&limit=30");
             List<Map<String, Object>> oiRows = bybitResultList(oiRoot);
             if (oiRows.size() >= 2) {
                 double latest = parseDouble(oiRows.get(0).get("openInterest"));
@@ -142,8 +144,7 @@ public class CryptoMarketDataService {
                 stats.openInterestChangePercent = oldest == 0 ? 0 : (latest - oldest) * 100 / oldest;
             }
 
-            Map<?, ?> ratioRoot = restTemplate.getForObject(
-                    "https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=" + symbol + "&period=5min&limit=1", Map.class);
+            Map<?, ?> ratioRoot = safeBybitRoot("/v5/market/account-ratio?category=linear&symbol=" + symbol + "&period=5min&limit=1");
             List<Map<String, Object>> ratioRows = bybitResultList(ratioRoot);
             if (!ratioRows.isEmpty()) {
                 stats.longAccount = parseDouble(ratioRows.get(0).get("buyRatio"));
@@ -151,15 +152,28 @@ public class CryptoMarketDataService {
                 stats.longShortRatio = stats.shortAccount == 0 ? 0 : stats.longAccount / stats.shortAccount;
             }
 
-            Map<?, ?> tradesRoot = restTemplate.getForObject(
-                    "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=" + symbol + "&limit=1000", Map.class);
+            Map<?, ?> tradesRoot = safeBybitRoot("/v5/market/recent-trade?category=linear&symbol=" + symbol + "&limit=1000");
             populateBybitTradeFlow(stats, bybitResultList(tradesRoot));
             stats.fetchedAt = System.currentTimeMillis();
-            lastFuturesSource = "BYBIT_PUBLIC_LINEAR_FALLBACK";
+            if (!lastFuturesSource.startsWith("BYBIT_PUBLIC_LINEAR")) lastFuturesSource = "BYBIT_PUBLIC_LINEAR_FALLBACK";
         } catch (Exception ignored) {
             lastFuturesSource = "FUTURES_UNAVAILABLE_BINANCE_AND_BYBIT";
         }
         return stats;
+    }
+
+    private Map<?, ?> safeBybitRoot(String path) {
+        for (String base : BYBIT_BASES) {
+            try {
+                Map<?, ?> response = restTemplate.getForObject(base + path, Map.class);
+                if (response == null || parseLong(response.get("retCode")) != 0) continue;
+                lastFuturesSource = "BYBIT_PUBLIC_LINEAR:" + base;
+                return response;
+            } catch (Exception ignored) {
+                // Try the next official/public Bybit host.
+            }
+        }
+        return Map.of();
     }
 
     private Map<?, ?> bybitResult(Map<?, ?> root) {
