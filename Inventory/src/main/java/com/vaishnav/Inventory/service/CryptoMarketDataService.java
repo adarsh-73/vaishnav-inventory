@@ -1,6 +1,7 @@
 package com.vaishnav.Inventory.service;
 
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.HttpEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -29,6 +30,8 @@ public class CryptoMarketDataService {
     private final RestTemplate restTemplate;
     private volatile String lastSpotSource = "BINANCE_NOT_FETCHED";
     private volatile String lastFuturesSource = "BINANCE_FUTURES_NOT_FETCHED";
+    private volatile List<?> hyperliquidContexts;
+    private volatile long hyperliquidContextsAt;
 
     public CryptoMarketDataService() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -71,7 +74,10 @@ public class CryptoMarketDataService {
         FuturesStats stats = new FuturesStats();
         stats.symbol = symbol;
         Map<?, ?> premium = safeFuturesMap("/fapi/v1/premiumIndex?symbol=" + symbol);
-        if (premium.isEmpty()) return getBybitFuturesStats(symbol, spotPrice);
+        if (premium.isEmpty()) {
+            FuturesStats bybit = getBybitFuturesStats(symbol, spotPrice);
+            return bybit.markPrice > 0 ? bybit : getHyperliquidFuturesStats(symbol, spotPrice);
+        }
         Map<?, ?> openInterest = safeFuturesMap("/fapi/v1/openInterest?symbol=" + symbol);
         Map<?, ?> ticker = safeFuturesMap("/fapi/v1/ticker/24hr?symbol=" + symbol);
 
@@ -160,6 +166,75 @@ public class CryptoMarketDataService {
             lastFuturesSource = "FUTURES_UNAVAILABLE_BINANCE_AND_BYBIT";
         }
         return stats;
+    }
+
+    @SuppressWarnings("unchecked")
+    private FuturesStats getHyperliquidFuturesStats(String symbol, double spotPrice) {
+        FuturesStats stats = new FuturesStats();
+        stats.symbol = symbol;
+        stats.spotPrice = spotPrice;
+        String coin = symbol.replace("USDT", "");
+        try {
+            List<?> root = hyperliquidMetaAndContexts();
+            if (root.size() < 2 || !(root.get(0) instanceof Map<?, ?> meta)
+                    || !(meta.get("universe") instanceof List<?> universe)
+                    || !(root.get(1) instanceof List<?> contexts)) return stats;
+            int index = -1;
+            for (int i = 0; i < universe.size(); i++) {
+                if (universe.get(i) instanceof Map<?, ?> asset && coin.equals(String.valueOf(asset.get("name")))) {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0 || index >= contexts.size() || !(contexts.get(index) instanceof Map<?, ?> context)) return stats;
+            stats.openInterest = parseDouble(context.get("openInterest"));
+            stats.markPrice = parseDouble(context.get("markPx"));
+            stats.indexPrice = parseDouble(context.get("oraclePx"));
+            stats.fundingRate = parseDouble(context.get("funding"));
+            stats.quoteVolume24h = parseDouble(context.get("dayNtlVlm"));
+            double previous = parseDouble(context.get("prevDayPx"));
+            stats.priceChangePercent24h = previous == 0 ? 0 : (stats.markPrice - previous) * 100 / previous;
+            stats.openInterestValue = stats.openInterest * stats.markPrice;
+            stats.spotFuturesBasisPercent = spotPrice == 0 ? 0 : (stats.markPrice - spotPrice) * 100 / spotPrice;
+
+            Map<String, Object> bookRequest = Map.of("type", "l2Book", "coin", coin);
+            Map<String, Object> book = restTemplate.postForObject(
+                    "https://api.hyperliquid.xyz/info", new HttpEntity<>(bookRequest), Map.class);
+            if (book != null && book.get("levels") instanceof List<?> levels && levels.size() >= 2) {
+                stats.bidDepthNotional = hyperliquidDepthNotional(levels.get(0));
+                stats.askDepthNotional = hyperliquidDepthNotional(levels.get(1));
+                double total = stats.bidDepthNotional + stats.askDepthNotional;
+                stats.orderBookImbalancePercent = total == 0 ? 0 :
+                        (stats.bidDepthNotional - stats.askDepthNotional) * 100 / total;
+            }
+            stats.fetchedAt = System.currentTimeMillis();
+            lastFuturesSource = "HYPERLIQUID_PUBLIC_PERPETUAL_FALLBACK";
+        } catch (Exception ignored) {
+            lastFuturesSource = "FUTURES_UNAVAILABLE_BINANCE_BYBIT_HYPERLIQUID";
+        }
+        return stats;
+    }
+
+    private synchronized List<?> hyperliquidMetaAndContexts() {
+        if (hyperliquidContexts != null && System.currentTimeMillis() - hyperliquidContextsAt < 15_000) {
+            return hyperliquidContexts;
+        }
+        List<?> response = restTemplate.postForObject(
+                "https://api.hyperliquid.xyz/info",
+                new HttpEntity<>(Map.of("type", "metaAndAssetCtxs")), List.class);
+        hyperliquidContexts = response == null ? List.of() : response;
+        hyperliquidContextsAt = System.currentTimeMillis();
+        return hyperliquidContexts;
+    }
+
+    private double hyperliquidDepthNotional(Object raw) {
+        if (!(raw instanceof List<?> rows)) return 0;
+        double total = 0;
+        for (Object item : rows) {
+            if (!(item instanceof Map<?, ?> row)) continue;
+            total += parseDouble(row.get("px")) * parseDouble(row.get("sz"));
+        }
+        return total;
     }
 
     private Map<?, ?> safeBybitRoot(String path) {
