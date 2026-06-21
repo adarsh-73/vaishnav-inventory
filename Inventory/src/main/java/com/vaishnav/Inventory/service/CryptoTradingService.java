@@ -24,16 +24,17 @@ public class CryptoTradingService {
     private static final double MAX_WEEKLY_LOSS_PERCENT = 8.0;
     private static final double MAX_NOTIONAL_LEVERAGE = 3.0;
     private static final int MIN_LIVE_AI_PROVIDERS = 2;
-    private static final String ENGINE_VERSION = "AEGIS_V4_ADAPTIVE_60D";
+    private static final String ENGINE_VERSION = "AEGIS_V5_HISTORICAL_MEMORY";
     private static final int MIN_LEARNING_SAMPLES = 20;
     private static final long LEARNING_CACHE_MS = 10 * 60 * 1000L;
     private static final Map<String, Double> BASE_WEIGHTS = Map.of(
-            "technical", 0.35,
-            "derivatives", 0.20,
-            "macroNews", 0.15,
-            "whales", 0.075,
-            "onChain", 0.075,
-            "ai", 0.15
+            "technical", 0.30,
+            "derivatives", 0.18,
+            "macroNews", 0.14,
+            "whales", 0.07,
+            "onChain", 0.07,
+            "historical", 0.12,
+            "ai", 0.12
     );
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile Map<String, Double> learnedWeights = BASE_WEIGHTS;
@@ -68,6 +69,9 @@ public class CryptoTradingService {
 
     @Autowired
     private CryptoOnChainService onChainService;
+
+    @Autowired
+    private CryptoHistoricalMemoryService historicalMemoryService;
 
 
     public Map<String, Object> getDashboard() {
@@ -303,6 +307,7 @@ public class CryptoTradingService {
             Map<String, Object> macroNews = macroNewsService.getContext();
             Map<String, Object> whaleSnapshot = whaleStreamService.snapshot(symbol);
             Map<String, Object> onChainSnapshot = onChainService.snapshot(symbol);
+            Map<String, Object> historicalMemory = historicalMemoryService.snapshot(symbol, macroNews, livePrice);
 
             int longCount = 0;
             int shortCount = 0;
@@ -378,6 +383,7 @@ public class CryptoTradingService {
             aiSnapshot.put("macroAndPublishedNews", macroNews);
             aiSnapshot.put("attributedWhales", whaleSnapshot);
             aiSnapshot.put("onChain", onChainSnapshot);
+            aiSnapshot.put("historicalPatternAndEventMemory", historicalMemory);
             aiSnapshot.put("riskPolicy", Map.of(
                     "maxRiskPerTradePercent", MAX_RISK_PER_TRADE_PERCENT,
                     "maxDailyLossPercent", MAX_DAILY_LOSS_PERCENT,
@@ -392,6 +398,9 @@ public class CryptoTradingService {
                     ? String.valueOf(whaleSnapshot.getOrDefault("bias", "NEUTRAL"))
                     : futures.largeTradeBias;
             String onChainBias = String.valueOf(onChainSnapshot.getOrDefault("bias", "NEUTRAL"));
+            Map<?, ?> historicalPattern = historicalMemory.get("pricePattern") instanceof Map<?, ?> value ? value : Map.of();
+            String historicalBias = String.valueOf(historicalPattern.containsKey("bias") ? historicalPattern.get("bias") : "NEUTRAL");
+            boolean historicalReady = String.valueOf(historicalPattern.get("status")).startsWith("LIVE");
             int macroNewsScore = directionalScore(finalSignal, macroBias, newsRisk);
             int whaleScore = directionalScore(finalSignal, whaleBias, "NORMAL");
             int onChainScore = directionalScore(finalSignal, onChainBias, "NORMAL");
@@ -403,10 +412,12 @@ public class CryptoTradingService {
             int whaleShortScore = directionalScore("SHORT", whaleBias, "NORMAL");
             int onChainLongScore = directionalScore("LONG", onChainBias, "NORMAL");
             int onChainShortScore = directionalScore("SHORT", onChainBias, "NORMAL");
+            int historicalLongScore = directionalScore("LONG", historicalBias, "NORMAL");
+            int historicalShortScore = directionalScore("SHORT", historicalBias, "NORMAL");
             boolean macroBlocked = "HIGH".equals(newsRisk) || ("RISK_OFF".equals(macroBias) && "LONG".equals(finalSignal));
-            int preAiLongScore = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, 50);
-            int preAiShortScore = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, 50);
-            boolean aiReviewEligible = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady
+            int preAiLongScore = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, historicalLongScore, 50);
+            int preAiShortScore = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, 50);
+            boolean aiReviewEligible = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady
                     && aligned && derivativesAligned && !fundingRisk && !macroBlocked
                     && Math.max(preAiLongScore, preAiShortScore) >= 58;
             aiSnapshot.put("aiReviewEligible", aiReviewEligible);
@@ -423,10 +434,10 @@ public class CryptoTradingService {
             int aiLongAverage = (int) toDouble(aiConsensus.get("aiLongAveragePercent"));
             int aiShortAverage = (int) toDouble(aiConsensus.get("aiShortAveragePercent"));
             int aiNoTradeAverage = (int) toDouble(aiConsensus.get("aiNoTradeAveragePercent"));
-            int longBlend = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, aiLongAverage);
-            int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, aiShortAverage);
+            int longBlend = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, historicalLongScore, aiLongAverage);
+            int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, aiShortAverage);
             int finalScore = "LONG".equals(finalSignal) ? longBlend : shortBlend;
-            boolean mandatoryReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && aiQuorumReady;
+            boolean mandatoryReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady && aiQuorumReady;
             boolean allowed = mandatoryReady && aligned && finalScore >= 65 && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
 
             double riskAmount = PAPER_ACCOUNT_EQUITY * MAX_RISK_PER_TRADE_PERCENT / 100.0;
@@ -469,6 +480,7 @@ public class CryptoTradingService {
             map.put("newsRisk", newsRisk);
             map.put("whaleBias", whaleBias);
             map.put("onChainBias", onChainBias);
+            map.put("historicalBias", historicalBias);
             map.put("dataReadiness", mandatoryReady ? "READY" : "BLOCKED_MISSING_MANDATORY_DATA");
             Map<String, Object> futuresData = new LinkedHashMap<>();
             futuresData.put("openInterest", futures.openInterest);
@@ -515,6 +527,7 @@ public class CryptoTradingService {
             map.put("whaleData", whaleSnapshot);
             map.put("onChainData", onChainSnapshot);
             map.put("macroNewsData", macroNews);
+            map.put("historicalMemory", historicalMemory);
 
             map.put("timeframes", List.of(
                     timeframeRow("15m", a15),
@@ -542,11 +555,13 @@ public class CryptoTradingService {
             readiness.put("news", newsReady ? "LIVE" : "UNAVAILABLE");
             readiness.put("whales", attributedWhaleReady ? "LIVE_ATTRIBUTED" : exchangeWhaleProxyReady ? "LIVE_PROXY" : String.valueOf(whaleSnapshot.get("status")));
             readiness.put("onChain", onChainReady ? "LIVE" : String.valueOf(onChainSnapshot.get("status")));
+            readiness.put("historical", String.valueOf(historicalPattern.get("status")));
             readiness.put("ai", aiQuorumReady
                     ? "LIVE (" + aiProviderCount + "/" + MIN_LIVE_AI_PROVIDERS + ")"
                     : "NEED_2_LIVE (" + aiProviderCount + "/" + MIN_LIVE_AI_PROVIDERS + ")");
             map.put("providerReadiness", readiness);
-            Map<String, Object> engineScores = Map.of("technical", avgScore, "derivatives", derivativesScore, "macroNews", macroNewsScore, "whales", whaleScore, "onChain", onChainScore, "ai", aiConfidence);
+            int historicalScore = "LONG".equals(finalSignal) ? historicalLongScore : historicalShortScore;
+            Map<String, Object> engineScores = Map.of("technical", avgScore, "derivatives", derivativesScore, "macroNews", macroNewsScore, "whales", whaleScore, "onChain", onChainScore, "historical", historicalScore, "ai", aiConfidence);
             Map<String, Object> evidence = new LinkedHashMap<>();
             evidence.put("engineScores", engineScores);
             evidence.put("timeframesAligned", aligned);
@@ -643,7 +658,7 @@ public class CryptoTradingService {
         return (int) Math.round(total / Math.max(1, timeframes.size()));
     }
 
-    private int blendedDirectionScore(int technical, int derivatives, int macroNews, int whales, int onChain, int ai) {
+    private int blendedDirectionScore(int technical, int derivatives, int macroNews, int whales, int onChain, int historical, int ai) {
         Map<String, Double> weights = adaptiveWeights();
         return (int) Math.round(
                 technical * weights.get("technical")
@@ -651,6 +666,7 @@ public class CryptoTradingService {
                         + macroNews * weights.get("macroNews")
                         + whales * weights.get("whales")
                         + onChain * weights.get("onChain")
+                        + historical * weights.get("historical")
                         + ai * weights.get("ai")
         );
     }
@@ -749,7 +765,7 @@ public class CryptoTradingService {
     private Map<String, Object> buildLearningReport(List<CryptoPaperTrade> trades) {
         List<CryptoPaperTrade> closed = trades.stream().filter(t -> Set.of("PROFIT", "LOSS").contains(t.getStatus())).toList();
         Map<String, double[]> stats = new LinkedHashMap<>();
-        for (String engine : List.of("technical", "derivatives", "macroNews", "whales", "onChain", "ai")) stats.put(engine, new double[3]);
+        for (String engine : List.of("technical", "derivatives", "macroNews", "whales", "onChain", "historical", "ai")) stats.put(engine, new double[3]);
         for (CryptoPaperTrade trade : closed) {
             try {
                 Map<?, ?> evidence = objectMapper.readValue(trade.getDecisionEvidence(), Map.class);

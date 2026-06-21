@@ -186,7 +186,7 @@ public class CryptoMacroNewsService {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> gdeltHeadlines() {
         try {
-            String query = URLEncoder.encode("(bitcoin OR ethereum OR crypto OR federal reserve OR inflation)", StandardCharsets.UTF_8);
+            String query = URLEncoder.encode("(bitcoin OR ethereum OR crypto OR federal reserve OR inflation OR MicroStrategy OR Strategy bitcoin OR BlackRock OR IBIT OR bitcoin ETF)", StandardCharsets.UTF_8);
             String url = "https://api.gdeltproject.org/api/v2/doc/doc?query=" + query + "&mode=artlist&maxrecords=20&format=json&timespan=2h";
             Map<String, Object> response = restTemplate.getForObject(url, Map.class);
             Object raw = response == null ? null : response.get("articles");
