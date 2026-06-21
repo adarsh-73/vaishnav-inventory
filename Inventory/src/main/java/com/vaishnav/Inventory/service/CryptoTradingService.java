@@ -9,6 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Service
@@ -22,8 +24,20 @@ public class CryptoTradingService {
     private static final double MAX_WEEKLY_LOSS_PERCENT = 8.0;
     private static final double MAX_NOTIONAL_LEVERAGE = 3.0;
     private static final int MIN_LIVE_AI_PROVIDERS = 2;
-    private static final String ENGINE_VERSION = "AEGIS_V3_EXPLAINABLE_2AI";
+    private static final String ENGINE_VERSION = "AEGIS_V4_ADAPTIVE_60D";
+    private static final int MIN_LEARNING_SAMPLES = 20;
+    private static final long LEARNING_CACHE_MS = 10 * 60 * 1000L;
+    private static final Map<String, Double> BASE_WEIGHTS = Map.of(
+            "technical", 0.35,
+            "derivatives", 0.20,
+            "macroNews", 0.15,
+            "whales", 0.075,
+            "onChain", 0.075,
+            "ai", 0.15
+    );
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private volatile Map<String, Double> learnedWeights = BASE_WEIGHTS;
+    private volatile long learnedWeightsAt;
 
     @Autowired
     private CryptoPaperTradeRepository paperTradeRepository;
@@ -63,7 +77,7 @@ public class CryptoTradingService {
                 .toList();
 
         removeLegacyRunningTrades();
-        List<CryptoPaperTrade> trades = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(40)).stream()
+        List<CryptoPaperTrade> trades = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(65)).stream()
                 .filter(trade -> ENGINE_VERSION.equals(trade.getEngineVersion()))
                 .toList();
 
@@ -95,6 +109,7 @@ public class CryptoTradingService {
                 .map(this::tradeSummary)
                 .toList());
         response.put("learningReport", buildLearningReport(trades));
+        response.put("twoMonthReport", buildTwoMonthReport(trades));
         response.put("recentDecisions", decisionAuditRepository.findTop50ByOrderByIdDesc().stream()
                 .map(this::decisionSummary)
                 .toList());
@@ -233,6 +248,7 @@ public class CryptoTradingService {
             if (riskDistance <= 0) riskDistance = trade.getEntryPrice() * 0.01;
 
             boolean closed = false;
+            boolean timeStop = trade.getOpenedAt() != null && trade.getOpenedAt().isBefore(LocalDateTime.now().minusHours(24));
             if ("LONG".equals(trade.getSide())) {
                 trade.setMaxFavorablePrice(Math.max(orDefault(trade.getMaxFavorablePrice(), trade.getEntryPrice()), currentPrice));
                 trade.setMaxAdversePrice(Math.min(orDefault(trade.getMaxAdversePrice(), trade.getEntryPrice()), currentPrice));
@@ -258,6 +274,7 @@ public class CryptoTradingService {
                 if (currentPrice >= trade.getStopLoss()) { closeTrade(trade, currentPrice, pnl, "Stop/trailing stop hit"); closed = true; }
                 else if (currentPrice <= trade.getTakeProfit()) { closeTrade(trade, currentPrice, pnl, "Take profit hit"); closed = true; }
             }
+            if (!closed && timeStop) { closeTrade(trade, currentPrice, pnl, "24h time stop"); closed = true; }
             if (!closed) trade.setExitPrice(currentPrice);
             paperTradeRepository.save(trade);
         }
@@ -627,8 +644,15 @@ public class CryptoTradingService {
     }
 
     private int blendedDirectionScore(int technical, int derivatives, int macroNews, int whales, int onChain, int ai) {
-        return (int) Math.round(technical * 0.35 + derivatives * 0.20 + macroNews * 0.15
-                + whales * 0.075 + onChain * 0.075 + ai * 0.15);
+        Map<String, Double> weights = adaptiveWeights();
+        return (int) Math.round(
+                technical * weights.get("technical")
+                        + derivatives * weights.get("derivatives")
+                        + macroNews * weights.get("macroNews")
+                        + whales * weights.get("whales")
+                        + onChain * weights.get("onChain")
+                        + ai * weights.get("ai")
+        );
     }
 
     public Map<String, Object> resetOldPaperTrades() {
@@ -710,6 +734,7 @@ public class CryptoTradingService {
         trade.setStatus(pnl >= 0 ? "PROFIT" : "LOSS");
         trade.setCloseReason(reason);
         trade.setClosedAt(LocalDateTime.now());
+        learnedWeightsAt = 0;
         trade.setExitSnapshot(toJson(Map.of(
                 "price", currentPrice,
                 "pnl", pnl,
@@ -737,15 +762,118 @@ public class CryptoTradingService {
                 }
             } catch (Exception ignored) { }
         }
+        Map<String, Double> activeWeights = calculateAdaptiveWeights(closed);
         Map<String, Object> engines = new LinkedHashMap<>();
         stats.forEach((name, value) -> engines.put(name, Map.of(
                 "samples", (int) value[2],
                 "averageEntryScore", value[2] == 0 ? 0 : Math.round(value[0] / value[2]),
                 "profitableScoreContribution", value[2] == 0 ? 0 : Math.round(value[1] / value[2]),
-                "learningActive", value[2] >= 20
+                "reliabilityPercent", engineReliability(closed, name),
+                "baseWeightPercent", Math.round(BASE_WEIGHTS.get(name) * 1000.0) / 10.0,
+                "activeWeightPercent", Math.round(activeWeights.get(name) * 1000.0) / 10.0,
+                "learningActive", closed.size() >= MIN_LEARNING_SAMPLES
         )));
-        return Map.of("closedTradeSamples", closed.size(), "minimumSamplesForWeightAdjustment", 20, "engines", engines,
-                "policy", "Store evidence now; adjust bounded weights only after 20 closed paper trades");
+        return Map.of("closedTradeSamples", closed.size(), "minimumSamplesForWeightAdjustment", MIN_LEARNING_SAMPLES, "engines", engines,
+                "learningActive", closed.size() >= MIN_LEARNING_SAMPLES,
+                "policy", "After 20 closed paper trades, engine weights adapt within safe bounded limits; risk thresholds and paper-only mode remain fixed.");
+    }
+
+    private synchronized Map<String, Double> adaptiveWeights() {
+        if (System.currentTimeMillis() - learnedWeightsAt < LEARNING_CACHE_MS) return learnedWeights;
+        List<CryptoPaperTrade> closed = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(65)).stream()
+                .filter(t -> ENGINE_VERSION.equals(t.getEngineVersion()))
+                .filter(t -> Set.of("PROFIT", "LOSS").contains(t.getStatus()))
+                .toList();
+        learnedWeights = calculateAdaptiveWeights(closed);
+        learnedWeightsAt = System.currentTimeMillis();
+        return learnedWeights;
+    }
+
+    private Map<String, Double> calculateAdaptiveWeights(List<CryptoPaperTrade> closed) {
+        if (closed.size() < MIN_LEARNING_SAMPLES) return BASE_WEIGHTS;
+        Map<String, Double> raw = new LinkedHashMap<>();
+        double total = 0;
+        for (String engine : BASE_WEIGHTS.keySet()) {
+            double reliability = engineReliability(closed, engine) / 100.0;
+            double multiplier = Math.max(0.75, Math.min(1.25, 0.75 + reliability * 0.5));
+            double adjusted = BASE_WEIGHTS.get(engine) * multiplier;
+            raw.put(engine, adjusted);
+            total += adjusted;
+        }
+        Map<String, Double> normalized = new LinkedHashMap<>();
+        for (Map.Entry<String, Double> entry : raw.entrySet()) normalized.put(entry.getKey(), entry.getValue() / total);
+        return Collections.unmodifiableMap(normalized);
+    }
+
+    private long engineReliability(List<CryptoPaperTrade> closed, String engine) {
+        double correctStrength = 0;
+        int samples = 0;
+        for (CryptoPaperTrade trade : closed) {
+            try {
+                Map<?, ?> evidence = objectMapper.readValue(trade.getDecisionEvidence(), Map.class);
+                if (!(evidence.get("engineScores") instanceof Map<?, ?> scores)) continue;
+                double entryScore = toDouble(scores.get(engine));
+                correctStrength += "PROFIT".equals(trade.getStatus()) ? entryScore : 100 - entryScore;
+                samples++;
+            } catch (Exception ignored) { }
+        }
+        return samples == 0 ? 50 : Math.round(correctStrength / samples);
+    }
+
+    private Map<String, Object> buildTwoMonthReport(List<CryptoPaperTrade> trades) {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(60);
+        List<CryptoPaperTrade> period = trades.stream()
+                .filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(cutoff))
+                .toList();
+        List<CryptoPaperTrade> closed = period.stream().filter(t -> Set.of("PROFIT", "LOSS").contains(t.getStatus())).toList();
+        long wins = closed.stream().filter(t -> "PROFIT".equals(t.getStatus())).count();
+        long losses = closed.size() - wins;
+        double netPnl = closed.stream().mapToDouble(t -> orDefault(t.getPnl(), 0)).sum();
+        double grossProfit = closed.stream().mapToDouble(t -> Math.max(0, orDefault(t.getPnl(), 0))).sum();
+        double grossLoss = Math.abs(closed.stream().mapToDouble(t -> Math.min(0, orDefault(t.getPnl(), 0))).sum());
+
+        Map<LocalDate, List<CryptoPaperTrade>> byDay = new TreeMap<>(Comparator.reverseOrder());
+        for (CryptoPaperTrade trade : period) byDay.computeIfAbsent(trade.getCreatedAt().toLocalDate(), ignored -> new ArrayList<>()).add(trade);
+        List<Map<String, Object>> daily = byDay.entrySet().stream().map(entry -> periodRow(entry.getKey().toString(), entry.getValue())).toList();
+
+        Map<String, List<CryptoPaperTrade>> byMonth = new TreeMap<>(Comparator.reverseOrder());
+        for (CryptoPaperTrade trade : period) {
+            String month = trade.getCreatedAt().getYear() + "-" + String.format("%02d", trade.getCreatedAt().getMonthValue());
+            byMonth.computeIfAbsent(month, ignored -> new ArrayList<>()).add(trade);
+        }
+        List<Map<String, Object>> monthly = byMonth.entrySet().stream().map(entry -> periodRow(entry.getKey(), entry.getValue())).toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("windowDays", 60);
+        result.put("totalTrades", period.size());
+        result.put("closedTrades", closed.size());
+        result.put("runningTrades", period.size() - closed.size());
+        result.put("wins", wins);
+        result.put("losses", losses);
+        result.put("winRate", closed.isEmpty() ? 0 : Math.round(wins * 1000.0 / closed.size()) / 10.0);
+        result.put("netPnl", netPnl);
+        result.put("averagePnl", closed.isEmpty() ? 0 : netPnl / closed.size());
+        result.put("profitFactor", grossLoss == 0 ? (grossProfit > 0 ? 999 : 0) : grossProfit / grossLoss);
+        result.put("activeDays", byDay.size());
+        result.put("daily", daily);
+        result.put("monthly", monthly);
+        result.put("learningStartsAfterClosedTrades", MIN_LEARNING_SAMPLES);
+        return result;
+    }
+
+    private Map<String, Object> periodRow(String period, List<CryptoPaperTrade> trades) {
+        List<CryptoPaperTrade> closed = trades.stream().filter(t -> Set.of("PROFIT", "LOSS").contains(t.getStatus())).toList();
+        long wins = closed.stream().filter(t -> "PROFIT".equals(t.getStatus())).count();
+        double pnl = closed.stream().mapToDouble(t -> orDefault(t.getPnl(), 0)).sum();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", period);
+        row.put("trades", trades.size());
+        row.put("closed", closed.size());
+        row.put("wins", wins);
+        row.put("losses", closed.size() - wins);
+        row.put("winRate", closed.isEmpty() ? 0 : Math.round(wins * 1000.0 / closed.size()) / 10.0);
+        row.put("pnl", pnl);
+        return row;
     }
 
     private String toJson(Object value) {
