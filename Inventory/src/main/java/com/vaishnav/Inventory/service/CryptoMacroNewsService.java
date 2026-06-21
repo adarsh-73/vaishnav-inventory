@@ -7,6 +7,8 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXParseException;
+import org.xml.sax.helpers.DefaultHandler;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.StringReader;
@@ -163,13 +165,21 @@ public class CryptoMacroNewsService {
         try {
             String xml = restTemplate.getForObject(url, String.class);
             if (xml == null || xml.isBlank()) return List.of();
+            String trimmed = xml.stripLeading();
+            if (!trimmed.startsWith("<") || trimmed.startsWith("<!DOCTYPE html") || trimmed.startsWith("<html")) return List.of();
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
             factory.setXIncludeAware(false);
             factory.setExpandEntityReferences(false);
-            Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+            var builder = factory.newDocumentBuilder();
+            builder.setErrorHandler(new DefaultHandler() {
+                @Override public void warning(SAXParseException error) { }
+                @Override public void error(SAXParseException error) { }
+                @Override public void fatalError(SAXParseException error) { }
+            });
+            Document document = builder.parse(new InputSource(new StringReader(trimmed)));
             NodeList items = document.getElementsByTagName("item");
             List<Map<String, Object>> result = new ArrayList<>();
             for (int i = 0; i < Math.min(items.getLength(), 12); i++) {

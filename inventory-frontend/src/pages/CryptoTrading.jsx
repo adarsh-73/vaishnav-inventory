@@ -29,6 +29,7 @@ export default function CryptoTrading() {
   const liveCoins=signals.filter(x=>Number(x.currentPrice)>0).length;
   const aiProviderStatus=dashboard?.aiProviderStatus||{};
   const configuredAi=Object.values(aiProviderStatus).filter(x=>x?.configured).length;
+  const liveAi=Object.values(aiProviderStatus).filter(x=>x?.runtimeStatus==="LIVE").length;
 
   return <main className="aegis-page"><style>{css}</style>
     <header className="aegis-header">
@@ -40,7 +41,7 @@ export default function CryptoTrading() {
       <Status label="Market feed" value={`${liveCoins}/${signals.length||4} live`} tone={liveCoins?"good":"bad"}/>
       <Status label="Macro regime" value={pretty(macro.macroBias||"Unavailable")} tone={macro.macroBias==="RISK_ON"?"good":macro.macroBias==="RISK_OFF"?"bad":"neutral"}/>
       <Status label="News risk" value={macro.risk||"Unavailable"} tone={macro.risk==="HIGH"?"bad":macro.risk==="NORMAL"?"good":"neutral"}/>
-      <Status label="AI providers" value={`${configuredAi}/${Object.keys(aiProviderStatus).length||7} configured`} tone={configuredAi?"good":"bad"}/>
+      <Status label="AI providers" value={`${liveAi} live · ${configuredAi} configured`} tone={liveAi>=2?"good":liveAi===1?"neutral":"bad"}/>
       <Status label="Trade readiness" value={selected?.dataReadiness||"Waiting"} tone={selected?.allowed?"good":"neutral"}/>
       <Status label="Fear & greed" value={fearGreed.value?`${number(fearGreed.value)} · ${fearGreed.classification}`:"Unavailable"} tone="neutral"/>
       <Status label="System mode" value="Real data · Paper" tone="good"/>

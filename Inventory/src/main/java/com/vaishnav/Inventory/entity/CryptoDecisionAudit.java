@@ -21,15 +21,12 @@ public class CryptoDecisionAudit {
     private String engineVersion;
     private Long openedTradeId;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String completeSnapshot;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String decisionEvidence;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String aiVotesJson;
 

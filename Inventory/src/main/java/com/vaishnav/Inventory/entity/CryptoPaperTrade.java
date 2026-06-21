@@ -53,19 +53,15 @@ public class CryptoPaperTrade {
     @Column(length = 4000)
     private String indicatorSnapshot;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String entrySnapshot;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String exitSnapshot;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String decisionEvidence;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String aiVotesJson;
 

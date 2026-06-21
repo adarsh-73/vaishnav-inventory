@@ -319,7 +319,7 @@ public class CryptoAiConsensusService {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         if (message.length() > 180) message = message.substring(0, 180);
         long cooldownMs = message.contains("429") || message.toLowerCase(Locale.ROOT).contains("too many requests")
-                ? 10 * 60 * 1000L : 60 * 1000L;
+                ? 30 * 60 * 1000L : 2 * 60 * 1000L;
         providerHealth.put(provider, new ProviderHealth("ERROR", Instant.now().toString(), message, System.currentTimeMillis() + cooldownMs));
         return Map.of("ai", provider, "model", model, "status", "ERROR", "verification", "API_CALL_FAILED", "signal", "NO_VOTE", "confidence", 0, "reason", message);
     }

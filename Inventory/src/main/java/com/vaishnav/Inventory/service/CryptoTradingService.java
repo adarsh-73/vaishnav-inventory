@@ -85,10 +85,14 @@ public class CryptoTradingService {
         response.put("dataPolicy", "No simulated market values. Missing providers return NOT_CONFIGURED or UNAVAILABLE.");
         response.put("symbols", signals);
         response.put("report", buildReport(trades));
-        response.put("openTrades", trades.stream().filter(trade -> "RUNNING".equals(trade.getStatus())).toList());
+        response.put("openTrades", trades.stream()
+                .filter(trade -> "RUNNING".equals(trade.getStatus()))
+                .map(this::tradeSummary)
+                .toList());
         response.put("recentTrades", trades.stream()
                 .sorted(Comparator.comparing(CryptoPaperTrade::getId).reversed())
                 .limit(25)
+                .map(this::tradeSummary)
                 .toList());
         response.put("learningReport", buildLearningReport(trades));
         response.put("recentDecisions", decisionAuditRepository.findTop50ByOrderByIdDesc().stream()
@@ -112,6 +116,37 @@ public class CryptoTradingService {
         summary.put("engineVersion", audit.getEngineVersion());
         summary.put("openedTradeId", audit.getOpenedTradeId());
         summary.put("createdAt", audit.getCreatedAt());
+        return summary;
+    }
+
+    private Map<String, Object> tradeSummary(CryptoPaperTrade trade) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("id", trade.getId());
+        summary.put("symbol", trade.getSymbol());
+        summary.put("side", trade.getSide());
+        summary.put("status", trade.getStatus());
+        summary.put("timeframe", trade.getTimeframe());
+        summary.put("entryPrice", trade.getEntryPrice());
+        summary.put("stopLoss", trade.getStopLoss());
+        summary.put("takeProfit", trade.getTakeProfit());
+        summary.put("exitPrice", trade.getExitPrice());
+        summary.put("quantity", trade.getQuantity());
+        summary.put("pnl", trade.getPnl());
+        summary.put("confidence", trade.getConfidence());
+        summary.put("finalScore", trade.getFinalScore());
+        summary.put("riskReward", trade.getRiskReward());
+        summary.put("accountRiskPercent", trade.getAccountRiskPercent());
+        summary.put("bestAi", trade.getBestAi());
+        summary.put("macroBias", trade.getMacroBias());
+        summary.put("whaleBias", trade.getWhaleBias());
+        summary.put("onChainBias", trade.getOnChainBias());
+        summary.put("dataReadiness", trade.getDataReadiness());
+        summary.put("closeReason", trade.getCloseReason());
+        summary.put("openedAt", trade.getOpenedAt());
+        summary.put("closedAt", trade.getClosedAt());
+        summary.put("createdAt", trade.getCreatedAt());
+        summary.put("engineVersion", trade.getEngineVersion());
+        summary.put("decisionAuditId", trade.getDecisionAuditId());
         return summary;
     }
 
