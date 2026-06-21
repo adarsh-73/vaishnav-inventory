@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
@@ -108,6 +109,7 @@ public class CryptoAiConsensusService {
         result.put("tieRule", "NO_TRADE");
         result.put("votes", votes);
         result.put("source", liveVotes.isEmpty() ? "NO_LIVE_LLM_APIS" : "REAL_PROVIDER_APIS");
+        result.put("marketReviewPerformed", true);
         result.put("cachedForSeconds", CACHE_MS / 1000);
         cache.put(cacheKey, new CachedConsensus(System.currentTimeMillis(), result));
         return result;
@@ -126,15 +128,18 @@ public class CryptoAiConsensusService {
     }
 
     public Map<String, Object> skippedByPrefilter() {
+        List<String> liveNames = healthyProviderNames();
+        int configured = configuredProviderCount();
+        boolean quorumReady = liveNames.size() >= MIN_LIVE_PROVIDERS;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("signal", "NO_TRADE");
         result.put("confidence", 0);
-        result.put("configuredProviders", 0);
-        result.put("liveProviders", 0);
+        result.put("configuredProviders", configured);
+        result.put("liveProviders", liveNames.size());
         result.put("requiredForConsensus", MIN_LIVE_PROVIDERS);
         result.put("geminiRequired", false);
-        result.put("geminiLive", false);
-        result.put("quorumReady", false);
+        result.put("geminiLive", liveNames.contains("Gemini"));
+        result.put("quorumReady", quorumReady);
         result.put("consensusStatus", "SKIPPED_PREFILTER_LOW_QUALITY");
         result.put("longVotePercent", 0);
         result.put("shortVotePercent", 0);
@@ -142,11 +147,12 @@ public class CryptoAiConsensusService {
         result.put("aiLongAveragePercent", 0);
         result.put("aiShortAveragePercent", 0);
         result.put("aiNoTradeAveragePercent", 100);
-        result.put("liveProviderNames", List.of());
+        result.put("liveProviderNames", liveNames);
         result.put("weighting", "EQUAL_WEIGHT_PER_LIVE_PROVIDER");
         result.put("tieRule", "NO_TRADE");
         result.put("votes", List.of());
         result.put("source", "AI_CALL_SKIPPED_TO_PROTECT_FREE_QUOTA");
+        result.put("marketReviewPerformed", false);
         result.put("cachedForSeconds", 0);
         return result;
     }
@@ -165,6 +171,31 @@ public class CryptoAiConsensusService {
         result.put("verificationOnly", true);
         result.put("verifiedAt", Instant.now().toString());
         return result;
+    }
+
+    @Scheduled(fixedDelay = 21_600_000, initialDelay = 60_000)
+    public void keepProviderQuorumWarm() {
+        try { verifyProvidersNow(); } catch (Exception ignored) { }
+    }
+
+    private int configuredProviderCount() {
+        int count = 0;
+        if (!openAiKey.isBlank()) count++;
+        if (!geminiKey.isBlank()) count++;
+        if (!anthropicKey.isBlank()) count++;
+        if (!deepSeekKey.isBlank()) count++;
+        if (!groqKey.isBlank()) count++;
+        if (!cerebrasKey.isBlank()) count++;
+        if (!mistralKey.isBlank()) count++;
+        return count;
+    }
+
+    private List<String> healthyProviderNames() {
+        return providerHealth.entrySet().stream()
+                .filter(entry -> "LIVE".equals(entry.getValue().status))
+                .map(Map.Entry::getKey)
+                .sorted()
+                .toList();
     }
 
     private Map<String, Object> providerConfig(String provider, boolean configured, String model, String keyName) {
