@@ -369,13 +369,6 @@ public class CryptoTradingService {
                     "paperOnly", true
             ));
             aiSnapshot.put("mandatoryDataReadiness", Map.of("market", futuresAvailable, "macro", macroReady, "news", newsReady, "whales", whaleReady, "onChain", onChainReady));
-            Map<String, Object> aiConsensus = aiConsensusService.analyze(symbol, aiSnapshot);
-            int aiProviderCount = (int) toDouble(aiConsensus.get("configuredProviders"));
-            String aiSignal = String.valueOf(aiConsensus.get("signal"));
-            boolean aiQuorumReady = Boolean.TRUE.equals(aiConsensus.get("quorumReady"));
-            boolean aiAligned = aiQuorumReady && finalSignal.equals(aiSignal);
-            int aiConfidence = (int) toDouble(aiConsensus.get("confidence"));
-
             String macroBias = String.valueOf(macroNews.getOrDefault("macroBias", "NEUTRAL"));
             String newsRisk = String.valueOf(macroNews.getOrDefault("risk", "NORMAL"));
             String whaleBias = attributedWhaleReady
@@ -393,13 +386,29 @@ public class CryptoTradingService {
             int whaleShortScore = directionalScore("SHORT", whaleBias, "NORMAL");
             int onChainLongScore = directionalScore("LONG", onChainBias, "NORMAL");
             int onChainShortScore = directionalScore("SHORT", onChainBias, "NORMAL");
+            boolean macroBlocked = "HIGH".equals(newsRisk) || ("RISK_OFF".equals(macroBias) && "LONG".equals(finalSignal));
+            int preAiLongScore = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, 50);
+            int preAiShortScore = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, 50);
+            boolean aiReviewEligible = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady
+                    && aligned && derivativesAligned && !fundingRisk && !macroBlocked
+                    && Math.max(preAiLongScore, preAiShortScore) >= 58;
+            aiSnapshot.put("aiReviewEligible", aiReviewEligible);
+            aiSnapshot.put("preAiLongScore", preAiLongScore);
+            aiSnapshot.put("preAiShortScore", preAiShortScore);
+            Map<String, Object> aiConsensus = aiReviewEligible
+                    ? aiConsensusService.analyze(symbol, aiSnapshot)
+                    : aiConsensusService.skippedByPrefilter();
+            int aiProviderCount = (int) toDouble(aiConsensus.get("configuredProviders"));
+            String aiSignal = String.valueOf(aiConsensus.get("signal"));
+            boolean aiQuorumReady = Boolean.TRUE.equals(aiConsensus.get("quorumReady"));
+            boolean aiAligned = aiQuorumReady && finalSignal.equals(aiSignal);
+            int aiConfidence = (int) toDouble(aiConsensus.get("confidence"));
             int aiLongAverage = (int) toDouble(aiConsensus.get("aiLongAveragePercent"));
             int aiShortAverage = (int) toDouble(aiConsensus.get("aiShortAveragePercent"));
             int aiNoTradeAverage = (int) toDouble(aiConsensus.get("aiNoTradeAveragePercent"));
             int longBlend = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, aiLongAverage);
             int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, aiShortAverage);
             int finalScore = "LONG".equals(finalSignal) ? longBlend : shortBlend;
-            boolean macroBlocked = "HIGH".equals(newsRisk) || ("RISK_OFF".equals(macroBias) && "LONG".equals(finalSignal));
             boolean mandatoryReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && aiQuorumReady;
             boolean allowed = mandatoryReady && aligned && finalScore >= 65 && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
 
@@ -416,6 +425,9 @@ public class CryptoTradingService {
             map.put("allowed", allowed);
             map.put("confidence", finalScore);
             map.put("finalScore", finalScore);
+            map.put("aiReviewEligible", aiReviewEligible);
+            map.put("preAiLongScore", preAiLongScore);
+            map.put("preAiShortScore", preAiShortScore);
             map.put("directionProbabilities", Map.of(
                     "longPercent", longBlend,
                     "shortPercent", shortBlend,

@@ -125,6 +125,32 @@ public class CryptoAiConsensusService {
         return status;
     }
 
+    public Map<String, Object> skippedByPrefilter() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("signal", "NO_TRADE");
+        result.put("confidence", 0);
+        result.put("configuredProviders", 0);
+        result.put("liveProviders", 0);
+        result.put("requiredForConsensus", MIN_LIVE_PROVIDERS);
+        result.put("geminiRequired", false);
+        result.put("geminiLive", false);
+        result.put("quorumReady", false);
+        result.put("consensusStatus", "SKIPPED_PREFILTER_LOW_QUALITY");
+        result.put("longVotePercent", 0);
+        result.put("shortVotePercent", 0);
+        result.put("noTradeVotePercent", 100);
+        result.put("aiLongAveragePercent", 0);
+        result.put("aiShortAveragePercent", 0);
+        result.put("aiNoTradeAveragePercent", 100);
+        result.put("liveProviderNames", List.of());
+        result.put("weighting", "EQUAL_WEIGHT_PER_LIVE_PROVIDER");
+        result.put("tieRule", "NO_TRADE");
+        result.put("votes", List.of());
+        result.put("source", "AI_CALL_SKIPPED_TO_PROTECT_FREE_QUOTA");
+        result.put("cachedForSeconds", 0);
+        return result;
+    }
+
     public void clearCache() { cache.clear(); }
 
     public Map<String, Object> verifyProvidersNow() {
