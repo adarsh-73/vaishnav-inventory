@@ -2,6 +2,8 @@ package com.vaishnav.Inventory.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vaishnav.Inventory.entity.CryptoLiquidationMemory;
+import com.vaishnav.Inventory.repository.CryptoLiquidationMemoryRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
@@ -9,6 +11,9 @@ import org.springframework.stereotype.Service;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -29,6 +34,11 @@ public class CryptoLiquidationStreamService {
     private volatile WebSocket socket;
     private volatile long lastMessageAt;
     private volatile String status = "CONNECTING";
+    private final CryptoLiquidationMemoryRepository repository;
+
+    public CryptoLiquidationStreamService(CryptoLiquidationMemoryRepository repository) {
+        this.repository = repository;
+    }
 
     @PostConstruct
     public void start() {
@@ -68,6 +78,17 @@ public class CryptoLiquidationStreamService {
         result.put("shortLiquidations", shortLiquidations);
         result.put("bias", longLiquidations > shortLiquidations ? "LONGS_LIQUIDATED" : shortLiquidations > longLiquidations ? "SHORTS_LIQUIDATED" : "NEUTRAL");
         result.put("lastMessageAt", lastMessageAt);
+        List<CryptoLiquidationMemory> stored = repository.findBySymbolAndEventTimeAfterOrderByEventTimeDesc(
+                symbol.toUpperCase(Locale.ROOT), LocalDateTime.now().minusDays(7));
+        double storedLong = stored.stream().filter(e -> "SELL".equals(e.getSide())).mapToDouble(e -> value(e.getNotional())).sum();
+        double storedShort = stored.stream().filter(e -> "BUY".equals(e.getSide())).mapToDouble(e -> value(e.getNotional())).sum();
+        result.put("stored7d", Map.of(
+                "eventCount", stored.size(),
+                "longLiquidationNotional", storedLong,
+                "shortLiquidationNotional", storedShort,
+                "largestEventNotional", stored.stream().mapToDouble(e -> value(e.getNotional())).max().orElse(0),
+                "lesson", liquidationLesson(storedLong, storedShort)
+        ));
         return result;
     }
 
@@ -107,11 +128,27 @@ public class CryptoLiquidationStreamService {
             long timestamp = order.path("T").asLong(System.currentTimeMillis());
             events.computeIfAbsent(symbol, key -> new ConcurrentLinkedDeque<>())
                     .addLast(new LiquidationEvent(timestamp, side, quantity * price));
+            CryptoLiquidationMemory memory = new CryptoLiquidationMemory();
+            memory.setSymbol(symbol);
+            memory.setSide(side);
+            memory.setPrice(price);
+            memory.setQuantity(quantity);
+            memory.setNotional(quantity * price);
+            memory.setEventTime(Instant.ofEpochMilli(timestamp).atZone(ZoneOffset.UTC).toLocalDateTime());
+            repository.save(memory);
             lastMessageAt = System.currentTimeMillis();
             status = "LIVE";
         } catch (Exception ignored) {
             status = "LIVE_PARSE_WARNING";
         }
+    }
+
+    private double value(Double value) { return value == null ? 0 : value; }
+
+    private String liquidationLesson(double longs, double shorts) {
+        if (longs > shorts * 1.5) return "Long leverage cascade: avoid catching a falling knife; wait for selling/CVD and OI to stabilize.";
+        if (shorts > longs * 1.5) return "Short squeeze: avoid fresh shorts into accelerating buy flow; wait for funding and OI normalization.";
+        return "Mixed liquidation flow: reduce leverage and wait for directional confirmation.";
     }
 
     private class Listener implements WebSocket.Listener {

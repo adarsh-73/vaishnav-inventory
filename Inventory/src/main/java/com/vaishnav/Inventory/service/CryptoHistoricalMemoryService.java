@@ -7,15 +7,21 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class CryptoHistoricalMemoryService {
     private static final long PATTERN_CACHE_MS = 4 * 60 * 60 * 1000L;
+    private static final long LONG_HISTORY_CACHE_MS = 24 * 60 * 60 * 1000L;
+    private static final long HISTORY_START_MS = LocalDate.of(2020, 1, 1).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli();
     private final CryptoMarketDataService marketDataService;
     private final CryptoNewsMemoryRepository repository;
     private final Map<String, CachedPattern> patternCache = new ConcurrentHashMap<>();
+    private final Map<String, CachedPattern> longHistoryCache = new ConcurrentHashMap<>();
 
     public CryptoHistoricalMemoryService(CryptoMarketDataService marketDataService, CryptoNewsMemoryRepository repository) {
         this.marketDataService = marketDataService;
@@ -27,12 +33,164 @@ public class CryptoHistoricalMemoryService {
         updateEventOutcomes(symbol, livePrice);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("pricePattern", historicalPattern(symbol));
+        result.put("longCycle", longCycleMemory(symbol, livePrice));
         result.put("eventMemory", eventMemory(symbol));
         result.put("institutionalWatch", institutionalWatch(symbol));
-        result.put("cmeGap", cmeGapPolicy());
+        result.put("cmeGap", cmeGapPolicy(symbol, livePrice));
         result.put("policy", "Historical analogs are evidence, not guarantees. Only published events are stored; unknown causes are never invented.");
         return result;
     }
+
+    private Map<String, Object> longCycleMemory(String symbol, double livePrice) {
+        CachedPattern cached = longHistoryCache.get(symbol);
+        if (cached != null && System.currentTimeMillis() - cached.createdAt < LONG_HISTORY_CACHE_MS) return cached.value;
+        try {
+            List<CryptoMarketDataService.Candle> candles = marketDataService.getCandlesSince(symbol, "1d", HISTORY_START_MS, 3000);
+            if (candles.size() < 365) return Map.of("status", "UNAVAILABLE", "reason", "Less than one year of daily history");
+            int end = candles.size() - 1;
+            double ath = candles.stream().mapToDouble(c -> c.high).max().orElse(livePrice);
+            double sma50 = candles.subList(Math.max(0, candles.size() - 50), candles.size()).stream().mapToDouble(c -> c.close).average().orElse(livePrice);
+            double sma200 = candles.subList(Math.max(0, candles.size() - 200), candles.size()).stream().mapToDouble(c -> c.close).average().orElse(livePrice);
+            double return30 = percent(candles.get(Math.max(0, end - 30)).close, candles.get(end).close);
+            double volatility30 = standardDeviation(candles, Math.max(1, end - 29), end);
+            String regime = livePrice < sma200 ? "BEAR_BELOW_200D" : sma50 < sma200 ? "RECOVERY_BELOW_50_200_CROSS" : "BULL_ABOVE_50D_200D";
+            List<Map<String, Object>> shocks = pumpDumpEvents(candles);
+            List<Map<String, Object>> analogs = dailyRegimeAnalogs(candles, end);
+            Map<String, Object> downside = downsideScenarios(candles, livePrice, analogs);
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("status", "LIVE_2020_PRESENT");
+            value.put("source", "BINANCE_DAILY_OHLCV_PAGINATED");
+            value.put("historyStart", date(candles.get(0).openTime));
+            value.put("historyEnd", date(candles.get(end).openTime));
+            value.put("dailyCandles", candles.size());
+            value.put("regime", regime);
+            value.put("currentVsHistory", Map.of(
+                    "sma50", sma50, "sma200", sma200, "ath", ath,
+                    "drawdownFromAthPercent", percent(ath, livePrice),
+                    "return30dPercent", return30, "realizedVolatility30dPercent", volatility30,
+                    "differentFromOldMarket", true,
+                    "why", "ETF/options, institutional treasury participation and 24/7 CME access changed market structure; historical price behaviour remains evidence, not a copy."
+            ));
+            value.put("pumpDumpEvents", shocks);
+            value.put("majorEventCount", shocks.size());
+            value.put("regimeAnalogs", analogs);
+            value.put("downsideScenarios", downside);
+            value.put("liquidationHistoryPolicy", Map.of(
+                    "status", "EXACT_2020_HISTORY_NOT_AVAILABLE_FREE",
+                    "available", "Live Binance force-order events captured by this app from deployment onward",
+                    "neverDo", "Do not convert candle volume into fake liquidation totals",
+                    "lesson", "Most cascades combine leverage, crowded positioning, thin order books and stop/maintenance-margin triggers; use bounded leverage, hard stops and avoid adding to liquidation momentum."
+            ));
+            longHistoryCache.put(symbol, new CachedPattern(System.currentTimeMillis(), value));
+            return value;
+        } catch (Exception error) {
+            return Map.of("status", "UNAVAILABLE", "reason", error.getMessage() == null ? "Historical fetch failed" : error.getMessage());
+        }
+    }
+
+    private List<Map<String, Object>> pumpDumpEvents(List<CryptoMarketDataService.Candle> candles) {
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (int i = 30; i < candles.size() - 30; i++) {
+            double day = percent(candles.get(i - 1).close, candles.get(i).close);
+            double seven = percent(candles.get(i - 7).close, candles.get(i).close);
+            if (Math.abs(day) < 7 && Math.abs(seven) < 15) continue;
+            double forward7 = percent(candles.get(i).close, candles.get(i + 7).close);
+            double forward30 = percent(candles.get(i).close, candles.get(i + 30).close);
+            double worst = candles.subList(i, i + 31).stream().mapToDouble(c -> c.low).min().orElse(candles.get(i).low);
+            String eventDate = date(candles.get(i).openTime);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", eventDate);
+            row.put("direction", day >= 0 ? "PUMP" : "DUMP");
+            row.put("dayMovePercent", day);
+            row.put("sevenDayMovePercent", seven);
+            row.put("next7dPercent", forward7);
+            row.put("next30dPercent", forward30);
+            row.put("next30dWorstDrawdownPercent", percent(candles.get(i).close, worst));
+            row.put("knownContext", knownEventContext(eventDate));
+            row.put("causePolicy", "Known context is a candidate explanation, never proof of a single cause.");
+            events.add(row);
+        }
+        return events.stream().sorted(Comparator.comparingDouble(e -> -Math.abs(number(e.get("dayMovePercent"))))).limit(60).toList();
+    }
+
+    private List<Map<String, Object>> dailyRegimeAnalogs(List<CryptoMarketDataService.Candle> candles, int end) {
+        double current30 = percent(candles.get(end - 30).close, candles.get(end).close);
+        double current90 = percent(candles.get(end - 90).close, candles.get(end).close);
+        double currentVol = standardDeviation(candles, end - 29, end);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (int i = 200; i < end - 30; i += 7) {
+            double r30 = percent(candles.get(i - 30).close, candles.get(i).close);
+            double r90 = percent(candles.get(i - 90).close, candles.get(i).close);
+            double vol = standardDeviation(candles, i - 29, i);
+            double distance = Math.abs(current30 - r30) / 8 + Math.abs(current90 - r90) / 20 + Math.abs(currentVol - vol) / 3;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", date(candles.get(i).openTime));
+            row.put("similarityPercent", Math.round(100 / (1 + distance)));
+            row.put("then30dReturnPercent", r30);
+            row.put("forward7dPercent", percent(candles.get(i).close, candles.get(i + 7).close));
+            row.put("forward30dPercent", percent(candles.get(i).close, candles.get(i + 30).close));
+            double low = candles.subList(i, i + 31).stream().mapToDouble(c -> c.low).min().orElse(candles.get(i).low);
+            row.put("forward30dWorstPercent", percent(candles.get(i).close, low));
+            rows.add(row);
+        }
+        return rows.stream().sorted(Comparator.comparingLong(e -> -Math.round(number(e.get("similarityPercent"))))).limit(12).toList();
+    }
+
+    private Map<String, Object> downsideScenarios(List<CryptoMarketDataService.Candle> candles, double livePrice, List<Map<String, Object>> analogs) {
+        List<Double> analogWorst = analogs.stream().map(e -> number(e.get("forward30dWorstPercent"))).sorted().toList();
+        double analogMedian = percentile(analogWorst, 0.5);
+        double analogStress = percentile(analogWorst, 0.15);
+        List<Double> swingLows = new ArrayList<>();
+        for (int i = Math.max(5, candles.size() - 730); i < candles.size() - 5; i++) {
+            double low = candles.get(i).low;
+            boolean local = true;
+            for (int j = i - 5; j <= i + 5; j++) if (candles.get(j).low < low) local = false;
+            if (local && low < livePrice) swingLows.add(low);
+        }
+        swingLows.sort(Comparator.reverseOrder());
+        List<Double> supports = swingLows.stream().filter(v -> v < livePrice * 0.995).limit(4).toList();
+        return Map.of(
+                "currentPrice", livePrice,
+                "baseCaseAnalogDownsidePercent", analogMedian,
+                "stressCaseAnalogDownsidePercent", analogStress,
+                "baseCasePrice", livePrice * (1 + analogMedian / 100),
+                "stressCasePrice", livePrice * (1 + analogStress / 100),
+                "historicalSwingSupports", supports,
+                "label", "SCENARIOS_NOT_FORECAST_OR_GUARANTEE",
+                "rule", "Use nearest valid support and invalidation; never assume the stress target must trade."
+        );
+    }
+
+    private double standardDeviation(List<CryptoMarketDataService.Candle> candles, int from, int to) {
+        List<Double> returns = new ArrayList<>();
+        for (int i = Math.max(1, from); i <= to; i++) returns.add(percent(candles.get(i - 1).close, candles.get(i).close));
+        double mean = returns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        return Math.sqrt(returns.stream().mapToDouble(v -> (v - mean) * (v - mean)).average().orElse(0));
+    }
+
+    private double percentile(List<Double> sorted, double p) {
+        if (sorted.isEmpty()) return 0;
+        return sorted.get(Math.max(0, Math.min(sorted.size() - 1, (int) Math.floor((sorted.size() - 1) * p))));
+    }
+
+    private String knownEventContext(String date) {
+        return switch (date) {
+            case "2020-03-12", "2020-03-13" -> "COVID-19 global liquidity shock and leveraged deleveraging";
+            case "2021-02-08" -> "Tesla disclosed a bitcoin purchase; institutional adoption repricing";
+            case "2021-05-19" -> "China restriction headlines plus crowded leverage unwind";
+            case "2021-09-07" -> "El Salvador launch-day volatility and leverage flush";
+            case "2022-05-09", "2022-05-10", "2022-05-11", "2022-05-12" -> "Terra/UST-LUNA collapse and contagion";
+            case "2022-06-13" -> "Celsius withdrawal pause and credit-contagion fears";
+            case "2022-11-08", "2022-11-09", "2022-11-10" -> "FTX solvency crisis and exchange contagion";
+            case "2023-03-10", "2023-03-13" -> "US banking stress and stablecoin/liquidity repricing";
+            case "2024-01-10", "2024-01-11" -> "US spot bitcoin ETF approval and launch flows";
+            case "2024-04-19", "2024-04-20" -> "Bitcoin halving-period positioning";
+            case "2024-08-05" -> "Global risk-off and yen carry-trade unwind";
+            default -> "NO_VERIFIED_EVENT_MATCH_IN_CURATED_CALENDAR";
+        };
+    }
+
+    private String date(long millis) { return Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString(); }
 
     private Map<String, Object> historicalPattern(String symbol) {
         CachedPattern cached = patternCache.get(symbol);
@@ -168,13 +326,20 @@ public class CryptoHistoricalMemoryService {
         );
     }
 
-    private Map<String, Object> cmeGapPolicy() {
-        return Map.of(
-                "status", "EDUCATIONAL_ONLY_NO_CME_PRICE_FEED",
-                "definition", "A CME gap is the untraded range between a CME futures close and its next reopen. It is context, not a guaranteed fill target.",
-                "currentRule", "Never score a CME gap without a verified CME futures price feed.",
-                "marketChange", "CME announced continuous 24/7 crypto futures trading from May 29, 2026 with a weekly maintenance window; old weekend-gap behaviour may not apply the same way."
-        );
+    private Map<String, Object> cmeGapPolicy(String symbol, double livePrice) {
+        if (!"BTCUSDT".equals(symbol)) return Map.of("status", "NOT_APPLICABLE", "definition", "CME bitcoin gap tracking applies to BTC.");
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("status", "NO_NEW_CLASSIC_WEEKEND_GAP_AFTER_24_7_LAUNCH");
+        value.put("currentPrice", livePrice);
+        value.put("definition", "A CME gap was the untraded range between the old Friday futures close and Sunday reopen. It is context, not a guaranteed fill target.");
+        value.put("marketChange", "CME moved crypto futures to continuous 24/7 trading on May 29, 2026, except a weekly maintenance window; the classic weekend-gap setup no longer forms the old way.");
+        value.put("legacyReportedLevels", List.of(
+                Map.of("level", 80_000, "side", "ABOVE", "reportedAt", "2026-05-28", "verification", "REQUIRES_CME_CONTRACT_SERIES"),
+                Map.of("level", 78_500, "side", "ABOVE", "reportedAt", "2026-05-28", "verification", "REQUIRES_CME_CONTRACT_SERIES"),
+                Map.of("level", 70_000, "side", "BELOW", "reportedAt", "2026-05-28", "verification", livePrice < 70_000 ? "SPOT_TRADED_BELOW_LEVEL_NOT_PROOF_OF_CME_FILL" : "REQUIRES_CME_CONTRACT_SERIES")
+        ));
+        value.put("currentRule", "No CME-gap score enters the trade until an official/licensed contract candle feed verifies open and filled status.");
+        return value;
     }
 
     private String category(String title) {

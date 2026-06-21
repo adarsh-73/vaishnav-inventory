@@ -103,7 +103,7 @@ public class CryptoMacroNewsService {
         context.put("oil", oil);
         context.put("headlineRiskCount", negative);
         context.put("headlinePositiveCount", positive);
-        context.put("headlines", scoredHeadlines.stream().limit(20).toList());
+        context.put("headlines", scoredHeadlines.stream().limit(30).toList());
         context.put("newsSentimentScore", scoredHeadlines.isEmpty() ? 0 : Math.round(scoredHeadlines.stream().mapToDouble(item -> toDouble(item.get("sentiment"))).average().orElse(0)));
         context.put("newsSource", headlines.isEmpty() ? "UNAVAILABLE" : "CRYPTONEWS_RSS_REAL");
         context.put("newsSourceStatus", Map.of(

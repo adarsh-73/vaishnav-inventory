@@ -43,6 +43,26 @@ public class CryptoMarketDataService {
     public List<Candle> getCandles(String symbol, String interval, int limit) {
         String path = "/api/v3/klines?symbol=" + symbol + "&interval=" + interval + "&limit=" + limit;
         Object[] response = getSpot(path, Object[].class);
+        return parseCandles(response);
+    }
+
+    public List<Candle> getCandlesSince(String symbol, String interval, long startTime, int maxCandles) {
+        List<Candle> result = new ArrayList<>();
+        long cursor = startTime;
+        while (result.size() < maxCandles) {
+            int limit = Math.min(1000, maxCandles - result.size());
+            String path = "/api/v3/klines?symbol=" + symbol + "&interval=" + interval + "&startTime=" + cursor + "&limit=" + limit;
+            List<Candle> page = parseCandles(getSpot(path, Object[].class));
+            if (page.isEmpty()) break;
+            result.addAll(page);
+            long next = page.get(page.size() - 1).closeTime + 1;
+            if (next <= cursor || page.size() < limit) break;
+            cursor = next;
+        }
+        return result;
+    }
+
+    private List<Candle> parseCandles(Object[] response) {
         List<Candle> candles = new ArrayList<>();
         if (response == null) return candles;
 
