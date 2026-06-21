@@ -426,7 +426,7 @@ public class CryptoTradingService {
             Map<String, Object> aiConsensus = aiReviewEligible
                     ? aiConsensusService.analyze(symbol, aiSnapshot)
                     : aiConsensusService.skippedByPrefilter();
-            int aiProviderCount = (int) toDouble(aiConsensus.get("configuredProviders"));
+            int aiProviderCount = (int) toDouble(aiConsensus.get("liveProviders"));
             String aiSignal = String.valueOf(aiConsensus.get("signal"));
             boolean aiQuorumReady = Boolean.TRUE.equals(aiConsensus.get("quorumReady"));
             boolean aiAligned = aiQuorumReady && finalSignal.equals(aiSignal);
