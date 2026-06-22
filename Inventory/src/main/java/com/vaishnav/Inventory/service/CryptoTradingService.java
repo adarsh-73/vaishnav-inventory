@@ -445,7 +445,8 @@ public class CryptoTradingService {
                     && aiAligned && aiConfidence >= 55 && !fundingRisk && !macroBlocked;
             boolean allowed = standardAllowed || exploratoryAllowed;
             String opportunityTier = standardAllowed ? "STANDARD" : exploratoryAllowed ? "EXPLORATORY_LEARNING" : "BLOCKED";
-            double effectiveRiskPercent = standardAllowed ? MAX_RISK_PER_TRADE_PERCENT : EXPLORATORY_RISK_PER_TRADE_PERCENT;
+            double effectiveRiskPercent = standardAllowed ? MAX_RISK_PER_TRADE_PERCENT
+                    : exploratoryAllowed ? EXPLORATORY_RISK_PER_TRADE_PERCENT : 0.0;
 
             double riskAmount = PAPER_ACCOUNT_EQUITY * effectiveRiskPercent / 100.0;
             double riskBasedQuantity = stopDistance <= 0 ? 0 : riskAmount / stopDistance;
