@@ -858,6 +858,12 @@ public class CryptoTradingService {
             byMonth.computeIfAbsent(month, ignored -> new ArrayList<>()).add(trade);
         }
         List<Map<String, Object>> monthly = byMonth.entrySet().stream().map(entry -> periodRow(entry.getKey(), entry.getValue())).toList();
+        List<CryptoPaperTrade> last7Days = period.stream()
+                .filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(LocalDateTime.now().minusDays(7)))
+                .toList();
+        List<CryptoPaperTrade> last30Days = period.stream()
+                .filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(LocalDateTime.now().minusDays(30)))
+                .toList();
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("windowDays", 60);
@@ -873,6 +879,8 @@ public class CryptoTradingService {
         result.put("activeDays", byDay.size());
         result.put("daily", daily);
         result.put("monthly", monthly);
+        result.put("weeklySummary", periodRow("LAST_7_DAYS", last7Days));
+        result.put("monthlySummary", periodRow("LAST_30_DAYS", last30Days));
         result.put("learningStartsAfterClosedTrades", MIN_LEARNING_SAMPLES);
         return result;
     }

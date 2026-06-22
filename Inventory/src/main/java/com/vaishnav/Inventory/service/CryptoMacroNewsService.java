@@ -50,6 +50,9 @@ public class CryptoMacroNewsService {
         CompletableFuture<List<Map<String, Object>>> coinDeskFuture = CompletableFuture.supplyAsync(() -> rssHeadlines("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"));
         CompletableFuture<List<Map<String, Object>>> coinTelegraphFuture = CompletableFuture.supplyAsync(() -> rssHeadlines("Cointelegraph", "https://cointelegraph.com/rss"));
         CompletableFuture<List<Map<String, Object>>> decryptFuture = CompletableFuture.supplyAsync(() -> rssHeadlines("Decrypt", "https://decrypt.co/feed"));
+        CompletableFuture<List<Map<String, Object>>> yahooNewsFuture = CompletableFuture.supplyAsync(() -> rssHeadlines("Yahoo Finance", "https://finance.yahoo.com/news/rssindex"));
+        CompletableFuture<List<Map<String, Object>>> institutionNewsFuture = CompletableFuture.supplyAsync(() -> googleNews("Bitcoin OR crypto MicroStrategy OR Strategy OR BlackRock OR ETF OR Elon Musk OR Donald Trump"));
+        CompletableFuture<List<Map<String, Object>>> globalRiskNewsFuture = CompletableFuture.supplyAsync(() -> googleNews("Bitcoin markets Federal Reserve OR China OR Japan OR Russia OR tariffs OR war OR inflation"));
 
         Map<String, Object> sp500 = sp500Future.join();
         Map<String, Object> vix = vixFuture.join();
@@ -62,12 +65,23 @@ public class CryptoMacroNewsService {
         List<Map<String, Object>> coinDesk = coinDeskFuture.join();
         List<Map<String, Object>> coinTelegraph = coinTelegraphFuture.join();
         List<Map<String, Object>> decrypt = decryptFuture.join();
+        List<Map<String, Object>> yahooNews = yahooNewsFuture.join();
+        List<Map<String, Object>> institutionNews = institutionNewsFuture.join();
+        List<Map<String, Object>> globalRiskNews = globalRiskNewsFuture.join();
         List<Map<String, Object>> headlines = new ArrayList<>();
+        headlines.addAll(institutionNews);
+        headlines.addAll(globalRiskNews);
+        headlines.addAll(yahooNews);
+        headlines.addAll(gdelt);
         headlines.addAll(coinDesk);
         headlines.addAll(coinTelegraph);
         headlines.addAll(decrypt);
-        if (headlines.isEmpty()) headlines.addAll(gdelt);
-        headlines = headlines.stream().filter(item -> !String.valueOf(item.get("title")).isBlank()).distinct().limit(30).toList();
+        LinkedHashMap<String, Map<String, Object>> uniqueHeadlines = new LinkedHashMap<>();
+        for (Map<String, Object> item : headlines) {
+            String title = String.valueOf(item.getOrDefault("title", "")).trim();
+            if (!title.isBlank()) uniqueHeadlines.putIfAbsent(title.toLowerCase(Locale.ROOT), item);
+        }
+        headlines = uniqueHeadlines.values().stream().limit(80).toList();
 
         int negative = 0, positive = 0;
         List<Map<String, Object>> scoredHeadlines = new ArrayList<>();
@@ -110,6 +124,9 @@ public class CryptoMacroNewsService {
                 "CoinDesk", coinDesk.isEmpty() ? "UNAVAILABLE" : "LIVE",
                 "Cointelegraph", coinTelegraph.isEmpty() ? "UNAVAILABLE" : "LIVE",
                 "Decrypt", decrypt.isEmpty() ? "UNAVAILABLE" : "LIVE",
+                "YahooFinance", yahooNews.isEmpty() ? "UNAVAILABLE" : "LIVE",
+                "GoogleGlobalRisk", globalRiskNews.isEmpty() ? "UNAVAILABLE" : "LIVE",
+                "GoogleInstitutions", institutionNews.isEmpty() ? "UNAVAILABLE" : "LIVE",
                 "TheBlock", "API_OR_LICENSE_REQUIRED",
                 "GDELT", gdelt.isEmpty() ? "UNAVAILABLE" : "LIVE"
         ));
@@ -241,6 +258,11 @@ public class CryptoMacroNewsService {
         } catch (Exception ignored) {
             return List.of();
         }
+    }
+
+    private List<Map<String, Object>> googleNews(String query) {
+        String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
+        return rssHeadlines("Google News Global", "https://news.google.com/rss/search?q=" + encoded + "&hl=en-US&gl=US&ceid=US:en");
     }
 
     private String childText(Element element, String tag) {
