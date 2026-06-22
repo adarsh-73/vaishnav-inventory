@@ -20,6 +20,7 @@ public class CryptoTradingService {
     private static final int MAX_DAILY_PAPER_TRADES = 5;
     private static final double PAPER_ACCOUNT_EQUITY = 100_000;
     private static final double MAX_RISK_PER_TRADE_PERCENT = 1.0;
+    private static final double EXPLORATORY_RISK_PER_TRADE_PERCENT = 0.25;
     private static final double MAX_DAILY_LOSS_PERCENT = 3.0;
     private static final double MAX_WEEKLY_LOSS_PERCENT = 8.0;
     private static final double MAX_NOTIONAL_LEVERAGE = 3.0;
@@ -417,9 +418,10 @@ public class CryptoTradingService {
             boolean macroBlocked = "HIGH".equals(newsRisk) || ("RISK_OFF".equals(macroBias) && "LONG".equals(finalSignal));
             int preAiLongScore = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, historicalLongScore, 50);
             int preAiShortScore = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, 50);
+            boolean exploratoryDerivativesAligned = derivativesScore >= 50;
             boolean aiReviewEligible = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady
-                    && aligned && derivativesAligned && !fundingRisk && !macroBlocked
-                    && Math.max(preAiLongScore, preAiShortScore) >= 58;
+                    && aligned && exploratoryDerivativesAligned && !fundingRisk && !macroBlocked
+                    && Math.max(preAiLongScore, preAiShortScore) >= 55;
             aiSnapshot.put("aiReviewEligible", aiReviewEligible);
             aiSnapshot.put("preAiLongScore", preAiLongScore);
             aiSnapshot.put("preAiShortScore", preAiShortScore);
@@ -438,9 +440,14 @@ public class CryptoTradingService {
             int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, aiShortAverage);
             int finalScore = "LONG".equals(finalSignal) ? longBlend : shortBlend;
             boolean mandatoryReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady && aiQuorumReady;
-            boolean allowed = mandatoryReady && aligned && finalScore >= 65 && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
+            boolean standardAllowed = mandatoryReady && aligned && finalScore >= 65 && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
+            boolean exploratoryAllowed = mandatoryReady && aligned && finalScore >= 58 && exploratoryDerivativesAligned
+                    && aiAligned && aiConfidence >= 55 && !fundingRisk && !macroBlocked;
+            boolean allowed = standardAllowed || exploratoryAllowed;
+            String opportunityTier = standardAllowed ? "STANDARD" : exploratoryAllowed ? "EXPLORATORY_LEARNING" : "BLOCKED";
+            double effectiveRiskPercent = standardAllowed ? MAX_RISK_PER_TRADE_PERCENT : EXPLORATORY_RISK_PER_TRADE_PERCENT;
 
-            double riskAmount = PAPER_ACCOUNT_EQUITY * MAX_RISK_PER_TRADE_PERCENT / 100.0;
+            double riskAmount = PAPER_ACCOUNT_EQUITY * effectiveRiskPercent / 100.0;
             double riskBasedQuantity = stopDistance <= 0 ? 0 : riskAmount / stopDistance;
             double maxQuantityByLeverage = PAPER_ACCOUNT_EQUITY * MAX_NOTIONAL_LEVERAGE / livePrice;
             double positionSize = Math.min(riskBasedQuantity, maxQuantityByLeverage);
@@ -451,6 +458,7 @@ public class CryptoTradingService {
             map.put("candidateSignal", finalSignal);
             map.put("rawSignal", finalSignal);
             map.put("allowed", allowed);
+            map.put("opportunityTier", opportunityTier);
             map.put("confidence", finalScore);
             map.put("finalScore", finalScore);
             map.put("aiReviewEligible", aiReviewEligible);
@@ -474,7 +482,7 @@ public class CryptoTradingService {
             map.put("riskReward", riskReward);
             map.put("positionSize", positionSize);
             map.put("positionNotional", positionSize * livePrice);
-            map.put("accountRiskPercent", MAX_RISK_PER_TRADE_PERCENT);
+            map.put("accountRiskPercent", effectiveRiskPercent);
             map.put("initialRiskAmount", riskAmount);
             map.put("macroBias", macroBias);
             map.put("newsRisk", newsRisk);
@@ -575,7 +583,7 @@ public class CryptoTradingService {
             evidence.put("directionProbabilities", map.get("directionProbabilities"));
             map.put("decisionEvidence", evidence);
             map.put("completeSnapshot", aiSnapshot);
-            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, derivativesAligned, aiAligned, aiConfidence, fundingRisk, macroBlocked);
+            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, exploratoryDerivativesAligned, aiAligned, aiConfidence, fundingRisk, macroBlocked);
             map.put("blockers", blockers);
             map.put("blockReason", allowed ? "" : String.join(" | ", blockers));
 
@@ -727,10 +735,10 @@ public class CryptoTradingService {
         if (macroBlocked) reasons.add("Macro/news risk guard blocked this direction");
         if (fundingRisk) reasons.add("Funding rate exceeds safety limit");
         if (!aligned) reasons.add("At least 2 of 3 technical timeframes do not agree");
-        if (!derivativesAligned) reasons.add("Futures/order-book/CVD confirmation is below 55%");
+        if (!derivativesAligned) reasons.add("Futures/order-book/CVD confirmation is below exploratory minimum 50%");
         if (!aiAligned) reasons.add("Live multi-provider AI consensus does not agree with the technical candidate");
-        if (aiConfidence < 60) reasons.add("Winning AI direction confidence is below 60%");
-        if (finalScore < 65) reasons.add("Weighted all-engine score is " + finalScore + "% (minimum 65%)");
+        if (aiConfidence < 55) reasons.add("Winning AI direction confidence is below exploratory minimum 55%");
+        if (finalScore < 58) reasons.add("Weighted all-engine score is " + finalScore + "% (exploratory minimum 58%)");
         if (reasons.isEmpty()) reasons.add("Deterministic risk circuit blocked the trade");
         return reasons;
     }
