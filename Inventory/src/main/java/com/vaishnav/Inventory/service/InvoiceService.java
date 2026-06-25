@@ -368,6 +368,13 @@ public class InvoiceService {
             int soldQuantity = oldItem.getQuantity() == null ? 0 : oldItem.getQuantity();
             int returnedQuantity = oldItem.getReturnedQuantity() == null ? 0 : oldItem.getReturnedQuantity();
             int directQuantityToRemove = Math.max(0, soldQuantity - returnedQuantity);
+            boolean markedDirect = DIRECT_ADD_SELL_LOCATION.equals(savedProduct.getProductLocation())
+                    || isLegacyDirectBillOnlyProduct(savedProduct);
+
+            if (!markedDirect) {
+                continue;
+            }
+
             if (directQuantityToRemove > 0) {
                 StockHistory history = new StockHistory();
                 history.setProducthistory(savedProduct);
@@ -381,9 +388,6 @@ public class InvoiceService {
             boolean linkedOnlyToThisBill = linkedItems.stream()
                     .allMatch(linked -> linked.getInvoice() != null && linked.getInvoice().getId() != null
                             && linked.getInvoice().getId().equals(invoice.getId()));
-
-            boolean markedDirect = DIRECT_ADD_SELL_LOCATION.equals(savedProduct.getProductLocation())
-                    || Boolean.TRUE.equals(oldItem.getAutoCreateProduct());
 
             if (markedDirect && linkedOnlyToThisBill) {
                 java.util.List<StockHistory> histories = stockHistoryRepository.findByProducthistory(savedProduct);
@@ -405,6 +409,23 @@ public class InvoiceService {
                 productRepository.save(savedProduct);
             }
         }
+    }
+
+    private boolean isLegacyDirectBillOnlyProduct(product productObj) {
+        if (productObj == null) return false;
+        boolean hasRealIdentity = hasText(productObj.getBrand())
+                || hasText(productObj.getMake())
+                || hasText(productObj.getModel())
+                || hasText(productObj.getProductLocation());
+        if (hasRealIdentity) return false;
+
+        return (productObj.getQuantity() == null || productObj.getQuantity() == 0)
+                && (productObj.getMinimumStock() == null || productObj.getMinimumStock() == 0)
+                && !hasText(productObj.getDescription());
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String normalizeIncomeCategory(String businessCategory, java.util.List<InvoiceItem> items) {
