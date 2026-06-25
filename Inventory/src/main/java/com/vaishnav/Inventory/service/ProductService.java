@@ -164,6 +164,12 @@ public class ProductService {
                 || hasText(productData.getProductLocation());
         if (hasRealIdentity) return false;
 
+        if ((productData.getQuantity() == null || productData.getQuantity() == 0)
+                && (productData.getMinimumStock() == null || productData.getMinimumStock() == 0)
+                && !hasText(productData.getDescription())) {
+            return true;
+        }
+
         List<InvoiceItem> linkedItems = invoiceItemRepository.findByProductInvoiceitem(productData);
         return !linkedItems.isEmpty()
                 && linkedItems.stream().allMatch(item -> Boolean.TRUE.equals(item.getAutoCreateProduct()));
