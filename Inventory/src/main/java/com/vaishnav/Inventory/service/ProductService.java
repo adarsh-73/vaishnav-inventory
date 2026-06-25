@@ -55,8 +55,11 @@ public class ProductService {
     }
 
     // Get All Products
+    @Transactional
     public List<product> getAllProducts() {
-        return productRepository.findAll();
+        return productRepository.findAll().stream()
+                .map(productData -> ensureProductCodes(productData, resolveCodePrefix(productData)))
+                .toList();
     }
 
     // Get Product By Id
@@ -144,6 +147,10 @@ public class ProductService {
             existingProduct.setDescription(updatedProduct.getDescription());
 
         return productRepository.save(existingProduct);
+    }
+
+    private String resolveCodePrefix(product productData) {
+        return "DIRECT_ADD_AND_SELL".equals(productData.getProductLocation()) ? "DS-" : "P-";
     }
 
     private product ensureProductCodes(product productData, String prefix) {
