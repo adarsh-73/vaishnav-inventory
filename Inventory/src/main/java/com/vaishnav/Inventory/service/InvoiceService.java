@@ -226,7 +226,8 @@ public class InvoiceService {
 
             int soldQuantity = item.getQuantity() == null ? 0 : item.getQuantity();
             if (Boolean.TRUE.equals(item.getAutoCreateProduct())) {
-                productobj = createOrRestockDirectSaleProduct(item, productobj, soldQuantity, invoice.getInvoiceNumber());
+                productobj = null;
+                item.setProductInvoiceitem(null);
             }
 
             if (productobj != null) {
@@ -262,6 +263,8 @@ public class InvoiceService {
             double sellPrice = item.getSellPrice() != null ? item.getSellPrice() : 0;
             double itemTotal = (item.getQuantity() == null ? 0 : item.getQuantity()) * sellPrice;
             item.setTotalPrice(itemTotal);
+            double purchasePrice = item.getPurchasePrice() == null ? 0 : item.getPurchasePrice();
+            item.setProfit((sellPrice - purchasePrice) * (item.getQuantity() == null ? 0 : item.getQuantity()));
 
             subtotalAmount += itemTotal;
 
@@ -301,56 +304,6 @@ public class InvoiceService {
         }
 
         return null;
-    }
-
-    private product createOrRestockDirectSaleProduct(InvoiceItem item, product existingProduct, int soldQuantity, String invoiceNumber) {
-        String productName = item.getDescription() == null || item.getDescription().isBlank()
-                ? "Direct billing item"
-                : item.getDescription().trim();
-        product productObj = existingProduct != null
-                ? existingProduct
-                : new product();
-
-        productObj.setProductName(productName);
-        productObj.setCategory(item.getStockCategory() == null || item.getStockCategory().isBlank()
-                ? "Accessories"
-                : item.getStockCategory());
-        productObj.setPurchasePrice(item.getPurchasePrice() == null ? 0 : item.getPurchasePrice());
-        productObj.setSellPrice(item.getSellPrice() == null ? 0 : item.getSellPrice());
-        productObj.setMinimumStock(productObj.getMinimumStock() == null ? 0 : productObj.getMinimumStock());
-        productObj.setProductLocation(DIRECT_ADD_SELL_LOCATION);
-        productObj.setDescription("Auto-created from Direct Stock Add + Sell. Delete/edit the bill to remove this stock record.");
-        productObj.setQuantity((productObj.getQuantity() == null ? 0 : productObj.getQuantity()) + soldQuantity);
-        productObj = productRepository.save(productObj);
-        ensureProductCodes(productObj);
-
-        if (soldQuantity > 0) {
-            StockHistory history = new StockHistory();
-            history.setProducthistory(productObj);
-            history.setQuantity(soldQuantity);
-            history.setStockType("IN");
-            history.setNote("Direct stock added while creating Invoice " + invoiceNumber + " | " + productIdentity(productObj));
-            stockHistoryRepository.save(history);
-        }
-
-        return productObj;
-    }
-
-    private void ensureProductCodes(product productObj) {
-        if (productObj == null || productObj.getId() == null) return;
-        boolean changed = false;
-        String code = "DS-" + String.format("%06d", productObj.getId());
-        if (productObj.getSerialNumber() == null || productObj.getSerialNumber().isBlank()) {
-            productObj.setSerialNumber(code);
-            changed = true;
-        }
-        if (productObj.getBarcode() == null || productObj.getBarcode().isBlank()) {
-            productObj.setBarcode(code);
-            changed = true;
-        }
-        if (changed) {
-            productRepository.save(productObj);
-        }
     }
 
     private Customer resolveCustomer(Customer incomingCustomer) {

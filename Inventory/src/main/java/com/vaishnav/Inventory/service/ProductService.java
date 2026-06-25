@@ -58,6 +58,7 @@ public class ProductService {
     @Transactional
     public List<product> getAllProducts() {
         return productRepository.findAll().stream()
+                .filter(productData -> !isDirectBillOnlyProduct(productData))
                 .map(productData -> ensureProductCodes(productData, resolveCodePrefix(productData)))
                 .toList();
     }
@@ -151,6 +152,25 @@ public class ProductService {
 
     private String resolveCodePrefix(product productData) {
         return "DIRECT_ADD_AND_SELL".equals(productData.getProductLocation()) ? "DS-" : "P-";
+    }
+
+    private boolean isDirectBillOnlyProduct(product productData) {
+        if (productData == null) return false;
+        if ("DIRECT_ADD_AND_SELL".equals(productData.getProductLocation())) return true;
+
+        boolean hasRealIdentity = hasText(productData.getBrand())
+                || hasText(productData.getMake())
+                || hasText(productData.getModel())
+                || hasText(productData.getProductLocation());
+        if (hasRealIdentity) return false;
+
+        List<InvoiceItem> linkedItems = invoiceItemRepository.findByProductInvoiceitem(productData);
+        return !linkedItems.isEmpty()
+                && linkedItems.stream().allMatch(item -> Boolean.TRUE.equals(item.getAutoCreateProduct()));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private product ensureProductCodes(product productData, String prefix) {

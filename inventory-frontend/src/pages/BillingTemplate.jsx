@@ -273,7 +273,7 @@ export default function VaishnavFinalInvoice() {
     const nextPaidValue = paidAmount === "" ? nextTotalAmount : Number(paidAmount || 0);
     const nextRemainingAmount = Math.max(nextTotalAmount - nextPaidValue, 0);
     const invoiceItemsPayload = nextItems.map((item) => ({
-      productInvoiceitem: item.productId ? { id: item.productId } : null,
+      productInvoiceitem: item.autoCreateProduct ? null : item.productId ? { id: item.productId } : null,
       description: item.desc,
       itemCategory: item.itemCategory || (item.productId ? "inventory_accessory" : (item.category === "service" || isServiceText(item.desc)) ? "service" : "manual_accessory"),
       autoCreateProduct: Boolean(item.autoCreateProduct),
@@ -407,14 +407,14 @@ export default function VaishnavFinalInvoice() {
     setDiscountNote(invoice.discountNote || "");
     setItems((invoice.invoiceItems || []).map((item) => ({
       id: item.id || Date.now() + Math.random(),
-      productId: item.productInvoiceitem?.id,
+      productId: item.autoCreateProduct ? null : item.productInvoiceitem?.id,
       desc: item.description || item.productInvoiceitem?.productName || "Item",
-      identity: item.productInvoiceitem ? getProductIdentity(item.productInvoiceitem) : "",
+      identity: item.autoCreateProduct ? "" : item.productInvoiceitem ? getProductIdentity(item.productInvoiceitem) : "",
       category: inferInvoiceItemCategory(item),
-      itemCategory: item.itemCategory || (item.productInvoiceitem ? "inventory_accessory" : inferInvoiceItemCategory(item) === "service" ? "service" : "manual_accessory"),
+      itemCategory: item.itemCategory || (item.autoCreateProduct ? "direct_stock_accessory" : item.productInvoiceitem ? "inventory_accessory" : inferInvoiceItemCategory(item) === "service" ? "service" : "manual_accessory"),
       qty: Number(item.quantity || 0),
-      rate: Number(item.sellPrice || item.productInvoiceitem?.sellPrice || 0),
-      purchasePrice: Number(item.purchasePrice || item.productInvoiceitem?.purchasePrice || 0),
+      rate: Number(item.sellPrice || (item.autoCreateProduct ? 0 : item.productInvoiceitem?.sellPrice) || 0),
+      purchasePrice: Number(item.purchasePrice || (item.autoCreateProduct ? 0 : item.productInvoiceitem?.purchasePrice) || 0),
       autoCreateProduct: Boolean(item.autoCreateProduct)
     })));
     window.scrollTo({ top: 0, behavior: "smooth" });
