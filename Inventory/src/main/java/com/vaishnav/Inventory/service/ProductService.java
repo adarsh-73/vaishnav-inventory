@@ -31,6 +31,10 @@ public class ProductService {
     // Add Product
     public product addProduct(product productData) {
 
+        if (productData.getBarcode() != null && productData.getBarcode().isBlank()) {
+            productData.setBarcode(null);
+        }
+
         // duplicate barcode check
         if (productData.getBarcode() != null &&
                 productRepository.existsByBarcode(productData.getBarcode())) {
@@ -46,7 +50,8 @@ public class ProductService {
             productData.setMinimumStock(1);
         }
 
-        return productRepository.save(productData);
+        product savedProduct = productRepository.save(productData);
+        return ensureProductCodes(savedProduct, "P-");
     }
 
     // Get All Products
@@ -139,6 +144,23 @@ public class ProductService {
             existingProduct.setDescription(updatedProduct.getDescription());
 
         return productRepository.save(existingProduct);
+    }
+
+    private product ensureProductCodes(product productData, String prefix) {
+        if (productData == null || productData.getId() == null) return productData;
+
+        boolean changed = false;
+        String code = prefix + String.format("%06d", productData.getId());
+        if (productData.getSerialNumber() == null || productData.getSerialNumber().isBlank()) {
+            productData.setSerialNumber(code);
+            changed = true;
+        }
+        if (productData.getBarcode() == null || productData.getBarcode().isBlank()) {
+            productData.setBarcode(code);
+            changed = true;
+        }
+
+        return changed ? productRepository.save(productData) : productData;
     }
 
     // Low Stock Products

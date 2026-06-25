@@ -175,27 +175,58 @@ function OldBills() {
     }
   };
 
+  const createOldInvoicePdf = async () => {
+    const sheet = document.getElementById("old-bill-print-sheet");
+    if (!sheet) throw new Error("Bill sheet nahi mila.");
+    const [{ jsPDF }, html2canvasModule] = await Promise.all([
+      import("jspdf"),
+      import("html2canvas")
+    ]);
+    const canvas = await html2canvasModule.default(sheet, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+    const pdf = new jsPDF("p", "mm", "a4");
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297);
+    return pdf;
+  };
+
   const handleDownloadPdf = async () => {
     try {
-      const sheet = document.getElementById("old-bill-print-sheet");
-      const [{ jsPDF }, html2canvasModule] = await Promise.all([
-        import("jspdf"),
-        import("html2canvas")
-      ]);
-      const canvas = await html2canvasModule.default(sheet, { scale: 2, backgroundColor: "#ffffff" });
-      const pdf = new jsPDF("p", "mm", "a4");
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297);
+      const pdf = await createOldInvoicePdf();
       pdf.save(`${selectedInvoice?.invoiceNumber || "old-bill"}.pdf`);
     } catch (error) {
       alert(`PDF download nahi hua: ${error.message}`);
     }
   };
 
-  const handleWhatsAppSend = () => {
+  const createOldInvoicePdfFile = async () => {
+    const pdf = await createOldInvoicePdf();
+    const filename = `${selectedInvoice?.invoiceNumber || "old-bill"}.pdf`;
+    return new File([pdf.output("blob")], filename, { type: "application/pdf" });
+  };
+
+  const handleWhatsAppSend = async () => {
     const cleanMobile = selectedInvoice?.customer?.mobileNumber?.replace(/\D/g, "") || "";
     const phone = cleanMobile.length === 10 ? `91${cleanMobile}` : cleanMobile;
     if (!phone) return alert("Is bill me customer mobile number nahi mila.");
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(invoiceMessage)}`, "_blank", "noopener,noreferrer");
+    const whatsappText = `${invoiceMessage}\n\nPDF bill attached/share kiya gaya hai. Agar attach na dikhe to downloaded PDF manually attach kar dein.`;
+
+    try {
+      const pdfFile = await createOldInvoicePdfFile();
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] }) && navigator.share) {
+        await navigator.share({
+          files: [pdfFile],
+          title: `${selectedInvoice?.invoiceNumber || "Vaishnav"} Invoice PDF`,
+          text: whatsappText
+        });
+        return;
+      }
+
+      const pdf = await createOldInvoicePdf();
+      pdf.save(pdfFile.name);
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(whatsappText)}`, "_blank", "noopener,noreferrer");
+      alert("PDF download ho gaya. WhatsApp Web security ke wajah se desktop browser PDF auto-attach nahi karta; downloaded PDF ko chat me attach kar dein.");
+    } catch (error) {
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(whatsappText)}`, "_blank", "noopener,noreferrer");
+    }
   };
 
   const handleEditBill = (invoice) => {

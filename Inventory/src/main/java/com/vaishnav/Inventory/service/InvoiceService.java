@@ -11,12 +11,15 @@ import com.vaishnav.Inventory.entity.Customer;
 import com.vaishnav.Inventory.entity.DailyBookEntry;
 import com.vaishnav.Inventory.repository.CustomerRepository;
 import com.vaishnav.Inventory.repository.DailyBookEntryRepository;
+import com.vaishnav.Inventory.repository.InvoiceItemRepository;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
 import com.vaishnav.Inventory.repository.ProductRepository;
 import com.vaishnav.Inventory.repository.StockHistoryRepository;
 
 @Service
 public class InvoiceService {
+
+    private static final String DIRECT_ADD_SELL_LOCATION = "DIRECT_ADD_AND_SELL";
 
     @Autowired
     private InvoiceRepository invoiceRepository;
@@ -32,6 +35,9 @@ public class InvoiceService {
 
     @Autowired
     private DailyBookEntryRepository dailyBookEntryRepository;
+
+    @Autowired
+    private InvoiceItemRepository invoiceItemRepository;
 
     @Transactional
     public Invoice createInvoice(Invoice invoice) {
@@ -54,6 +60,7 @@ public class InvoiceService {
                 .orElseThrow(() -> new RuntimeException("Invoice not found"));
 
         restoreStock(existing, "Stock restored before editing Invoice " + existing.getInvoiceNumber());
+        cleanupDirectSaleProducts(existing, "Direct add stock removed before editing Invoice " + existing.getInvoiceNumber());
         if (existing.getInvoiceItems() != null) {
             existing.getInvoiceItems().clear();
         }
@@ -94,6 +101,7 @@ public class InvoiceService {
 
         for (Invoice invoiceToDelete : invoicesToDelete) {
             restoreStock(invoiceToDelete, "Stock restored after deleting Invoice " + invoiceToDelete.getInvoiceNumber());
+            cleanupDirectSaleProducts(invoiceToDelete, "Direct add stock deleted with Invoice " + invoiceToDelete.getInvoiceNumber());
             invoiceRepository.delete(invoiceToDelete);
         }
     }
@@ -217,8 +225,8 @@ public class InvoiceService {
             if (item.getReturnedQuantity() == null) item.setReturnedQuantity(0);
 
             int soldQuantity = item.getQuantity() == null ? 0 : item.getQuantity();
-            if (Boolean.TRUE.equals(item.getAutoCreateProduct()) && productobj == null) {
-                productobj = createOrRestockDirectSaleProduct(item, soldQuantity, invoice.getInvoiceNumber());
+            if (Boolean.TRUE.equals(item.getAutoCreateProduct())) {
+                productobj = createOrRestockDirectSaleProduct(item, productobj, soldQuantity, invoice.getInvoiceNumber());
             }
 
             if (productobj != null) {
@@ -295,12 +303,13 @@ public class InvoiceService {
         return null;
     }
 
-    private product createOrRestockDirectSaleProduct(InvoiceItem item, int soldQuantity, String invoiceNumber) {
+    private product createOrRestockDirectSaleProduct(InvoiceItem item, product existingProduct, int soldQuantity, String invoiceNumber) {
         String productName = item.getDescription() == null || item.getDescription().isBlank()
                 ? "Direct billing item"
                 : item.getDescription().trim();
-        product productObj = productRepository.findFirstByProductNameIgnoreCase(productName)
-                .orElseGet(product::new);
+        product productObj = existingProduct != null
+                ? existingProduct
+                : new product();
 
         productObj.setProductName(productName);
         productObj.setCategory(item.getStockCategory() == null || item.getStockCategory().isBlank()
@@ -309,8 +318,11 @@ public class InvoiceService {
         productObj.setPurchasePrice(item.getPurchasePrice() == null ? 0 : item.getPurchasePrice());
         productObj.setSellPrice(item.getSellPrice() == null ? 0 : item.getSellPrice());
         productObj.setMinimumStock(productObj.getMinimumStock() == null ? 0 : productObj.getMinimumStock());
+        productObj.setProductLocation(DIRECT_ADD_SELL_LOCATION);
+        productObj.setDescription("Auto-created from Direct Stock Add + Sell. Delete/edit the bill to remove this stock record.");
         productObj.setQuantity((productObj.getQuantity() == null ? 0 : productObj.getQuantity()) + soldQuantity);
         productObj = productRepository.save(productObj);
+        ensureProductCodes(productObj);
 
         if (soldQuantity > 0) {
             StockHistory history = new StockHistory();
@@ -322,6 +334,23 @@ public class InvoiceService {
         }
 
         return productObj;
+    }
+
+    private void ensureProductCodes(product productObj) {
+        if (productObj == null || productObj.getId() == null) return;
+        boolean changed = false;
+        String code = "DS-" + String.format("%06d", productObj.getId());
+        if (productObj.getSerialNumber() == null || productObj.getSerialNumber().isBlank()) {
+            productObj.setSerialNumber(code);
+            changed = true;
+        }
+        if (productObj.getBarcode() == null || productObj.getBarcode().isBlank()) {
+            productObj.setBarcode(code);
+            changed = true;
+        }
+        if (changed) {
+            productRepository.save(productObj);
+        }
     }
 
     private Customer resolveCustomer(Customer incomingCustomer) {
@@ -368,6 +397,59 @@ public class InvoiceService {
                     history.setNote(note);
                     stockHistoryRepository.save(history);
                 }
+            }
+        }
+    }
+
+    private void cleanupDirectSaleProducts(Invoice invoice, String note) {
+        if (invoice.getInvoiceItems() == null) return;
+
+        for (InvoiceItem oldItem : invoice.getInvoiceItems()) {
+            if (!Boolean.TRUE.equals(oldItem.getAutoCreateProduct())) continue;
+            product directProduct = oldItem.getProductInvoiceitem();
+            if (directProduct == null || directProduct.getId() == null) continue;
+
+            product savedProduct = productRepository.findById(directProduct.getId()).orElse(null);
+            if (savedProduct == null) continue;
+
+            int soldQuantity = oldItem.getQuantity() == null ? 0 : oldItem.getQuantity();
+            int returnedQuantity = oldItem.getReturnedQuantity() == null ? 0 : oldItem.getReturnedQuantity();
+            int directQuantityToRemove = Math.max(0, soldQuantity - returnedQuantity);
+            if (directQuantityToRemove > 0) {
+                StockHistory history = new StockHistory();
+                history.setProducthistory(savedProduct);
+                history.setQuantity(directQuantityToRemove);
+                history.setStockType("DIRECT_DELETE");
+                history.setNote(note + " | " + productIdentity(savedProduct));
+                stockHistoryRepository.save(history);
+            }
+
+            java.util.List<InvoiceItem> linkedItems = invoiceItemRepository.findByProductInvoiceitem(savedProduct);
+            boolean linkedOnlyToThisBill = linkedItems.stream()
+                    .allMatch(linked -> linked.getInvoice() != null && linked.getInvoice().getId() != null
+                            && linked.getInvoice().getId().equals(invoice.getId()));
+
+            boolean markedDirect = DIRECT_ADD_SELL_LOCATION.equals(savedProduct.getProductLocation())
+                    || Boolean.TRUE.equals(oldItem.getAutoCreateProduct());
+
+            if (markedDirect && linkedOnlyToThisBill) {
+                java.util.List<StockHistory> histories = stockHistoryRepository.findByProducthistory(savedProduct);
+                for (StockHistory history : histories) {
+                    history.setProducthistory(null);
+                }
+                stockHistoryRepository.saveAll(histories);
+
+                for (InvoiceItem linked : linkedItems) {
+                    if (linked.getDescription() == null || linked.getDescription().isBlank()) {
+                        linked.setDescription(savedProduct.getProductName());
+                    }
+                    linked.setProductInvoiceitem(null);
+                }
+                invoiceItemRepository.saveAll(linkedItems);
+                productRepository.delete(savedProduct);
+            } else if (markedDirect) {
+                savedProduct.setQuantity(Math.max(0, (savedProduct.getQuantity() == null ? 0 : savedProduct.getQuantity()) - directQuantityToRemove));
+                productRepository.save(savedProduct);
             }
         }
     }

@@ -196,6 +196,12 @@ export default function VaishnavFinalInvoice() {
     }
   };
 
+  const createInvoicePdfFile = async () => {
+    const pdf = await createInvoicePdf();
+    const filename = `${billNo || "vaishnav-bill"}.pdf`;
+    return new File([pdf.output("blob")], filename, { type: "application/pdf" });
+  };
+
   const invoiceMessage = useMemo(() => {
     const itemLines = items.map((item, index) =>
       `${index + 1}. ${item.desc}${item.identity ? ` (${item.identity})` : ""} - Qty ${item.qty} x Rs. ${item.rate} = Rs. ${item.qty * item.rate}`
@@ -228,14 +234,24 @@ export default function VaishnavFinalInvoice() {
       alert("Direct WhatsApp open karne ke liye customer ka mobile number bharna zaroori hai.");
       return;
     }
-    const url = phone
-      ? `https://wa.me/${phone}?text=${encodeURIComponent(invoiceMessage)}`
-      : `https://wa.me/?text=${encodeURIComponent(invoiceMessage)}`;
+    const whatsappText = `${invoiceMessage}\n\nPDF bill attached/share kiya gaya hai. Agar attach na dikhe to downloaded PDF manually attach kar dein.`;
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(whatsappText)}`;
 
     try {
+      const pdfFile = await createInvoicePdfFile();
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] }) && navigator.share) {
+        await navigator.share({
+          files: [pdfFile],
+          title: `${billNo || "Vaishnav"} Invoice PDF`,
+          text: whatsappText
+        });
+        return;
+      }
+
       const pdf = await createInvoicePdf();
-      pdf.save(`${billNo || "vaishnav-bill"}.pdf`);
+      pdf.save(pdfFile.name);
       window.open(url, '_blank', 'noopener,noreferrer');
+      alert("PDF download ho gaya. WhatsApp Web security ke wajah se desktop browser PDF auto-attach nahi karta; downloaded PDF ko chat me attach kar dein.");
     } catch (error) {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
