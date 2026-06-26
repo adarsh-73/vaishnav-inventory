@@ -30,7 +30,9 @@ public class CryptoTradingController {
 
     @GetMapping("/dashboard")
     public Map<String, Object> dashboard() {
-        return cryptoTradingService.getDashboard();
+        Map<String, Object> dashboard = cryptoTradingService.getDashboard();
+        dashboard.put("automation", cryptoPaperAutomationService.status());
+        return dashboard;
     }
 
     @PostMapping("/paper-scan")

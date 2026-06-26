@@ -21,11 +21,21 @@ public class CryptoTradingService {
     private static final double PAPER_ACCOUNT_EQUITY = 100_000;
     private static final double MAX_RISK_PER_TRADE_PERCENT = 1.0;
     private static final double EXPLORATORY_RISK_PER_TRADE_PERCENT = 0.25;
+    private static final double LEARNING_SCOUT_RISK_PER_TRADE_PERCENT = 0.10;
     private static final double MAX_DAILY_LOSS_PERCENT = 3.0;
     private static final double MAX_WEEKLY_LOSS_PERCENT = 8.0;
     private static final double MAX_NOTIONAL_LEVERAGE = 3.0;
     private static final int MIN_LIVE_AI_PROVIDERS = 2;
-    private static final String ENGINE_VERSION = "AEGIS_V5_HISTORICAL_MEMORY";
+    private static final String ENGINE_VERSION = "AEGIS_V6_LEARNING_SCOUT";
+    private static final int STANDARD_MIN_SCORE = 65;
+    private static final int EXPLORATORY_MIN_SCORE = 56;
+    private static final int LEARNING_SCOUT_MIN_SCORE = 52;
+    private static final int STANDARD_MIN_DERIVATIVES = 55;
+    private static final int EXPLORATORY_MIN_DERIVATIVES = 45;
+    private static final int LEARNING_SCOUT_MIN_DERIVATIVES = 40;
+    private static final int AI_PREFILTER_MIN_SCORE = 50;
+    private static final int EXPLORATORY_MIN_AI_CONFIDENCE = 52;
+    private static final int LEARNING_SCOUT_MIN_AI_CONFIDENCE = 45;
     private static final int MIN_LEARNING_SAMPLES = 20;
     private static final long LEARNING_CACHE_MS = 10 * 60 * 1000L;
     private static final Map<String, Double> BASE_WEIGHTS = Map.of(
@@ -346,7 +356,7 @@ public class CryptoTradingService {
             int derivativesLongScore = derivativesScore("LONG", futures);
             int derivativesShortScore = derivativesScore("SHORT", futures);
             int derivativesScore = "LONG".equals(finalSignal) ? derivativesLongScore : derivativesShortScore;
-            boolean derivativesAligned = derivativesScore >= 55;
+            boolean derivativesAligned = derivativesScore >= STANDARD_MIN_DERIVATIVES;
 
             boolean macroReady = macroDataReady(macroNews);
             boolean newsReady = macroNews.get("headlines") instanceof List<?> list && !list.isEmpty();
@@ -418,10 +428,11 @@ public class CryptoTradingService {
             boolean macroBlocked = "HIGH".equals(newsRisk) || ("RISK_OFF".equals(macroBias) && "LONG".equals(finalSignal));
             int preAiLongScore = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, historicalLongScore, 50);
             int preAiShortScore = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, 50);
-            boolean exploratoryDerivativesAligned = derivativesScore >= 50;
+            boolean exploratoryDerivativesAligned = derivativesScore >= EXPLORATORY_MIN_DERIVATIVES;
+            boolean learningScoutDerivativesAligned = derivativesScore >= LEARNING_SCOUT_MIN_DERIVATIVES;
             boolean aiReviewEligible = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady
-                    && aligned && exploratoryDerivativesAligned && !fundingRisk && !macroBlocked
-                    && Math.max(preAiLongScore, preAiShortScore) >= 55;
+                    && aligned && learningScoutDerivativesAligned && !fundingRisk
+                    && Math.max(preAiLongScore, preAiShortScore) >= AI_PREFILTER_MIN_SCORE;
             aiSnapshot.put("aiReviewEligible", aiReviewEligible);
             aiSnapshot.put("preAiLongScore", preAiLongScore);
             aiSnapshot.put("preAiShortScore", preAiShortScore);
@@ -440,13 +451,16 @@ public class CryptoTradingService {
             int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, aiShortAverage);
             int finalScore = "LONG".equals(finalSignal) ? longBlend : shortBlend;
             boolean mandatoryReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady && aiQuorumReady;
-            boolean standardAllowed = mandatoryReady && aligned && finalScore >= 65 && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
-            boolean exploratoryAllowed = mandatoryReady && aligned && finalScore >= 58 && exploratoryDerivativesAligned
-                    && aiAligned && aiConfidence >= 55 && !fundingRisk && !macroBlocked;
-            boolean allowed = standardAllowed || exploratoryAllowed;
-            String opportunityTier = standardAllowed ? "STANDARD" : exploratoryAllowed ? "EXPLORATORY_LEARNING" : "BLOCKED";
+            boolean standardAllowed = mandatoryReady && aligned && finalScore >= STANDARD_MIN_SCORE && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
+            boolean exploratoryAllowed = mandatoryReady && aligned && finalScore >= EXPLORATORY_MIN_SCORE && exploratoryDerivativesAligned
+                    && aiAligned && aiConfidence >= EXPLORATORY_MIN_AI_CONFIDENCE && !fundingRisk && !macroBlocked;
+            boolean learningScoutAllowed = mandatoryReady && aligned && finalScore >= LEARNING_SCOUT_MIN_SCORE && learningScoutDerivativesAligned
+                    && aiAligned && aiConfidence >= LEARNING_SCOUT_MIN_AI_CONFIDENCE && !fundingRisk;
+            boolean allowed = standardAllowed || exploratoryAllowed || learningScoutAllowed;
+            String opportunityTier = standardAllowed ? "STANDARD" : exploratoryAllowed ? "EXPLORATORY_LEARNING" : learningScoutAllowed ? "LEARNING_SCOUT" : "BLOCKED";
             double effectiveRiskPercent = standardAllowed ? MAX_RISK_PER_TRADE_PERCENT
-                    : exploratoryAllowed ? EXPLORATORY_RISK_PER_TRADE_PERCENT : 0.0;
+                    : exploratoryAllowed ? EXPLORATORY_RISK_PER_TRADE_PERCENT
+                    : learningScoutAllowed ? LEARNING_SCOUT_RISK_PER_TRADE_PERCENT : 0.0;
 
             double riskAmount = PAPER_ACCOUNT_EQUITY * effectiveRiskPercent / 100.0;
             double riskBasedQuantity = stopDistance <= 0 ? 0 : riskAmount / stopDistance;
@@ -584,7 +598,7 @@ public class CryptoTradingService {
             evidence.put("directionProbabilities", map.get("directionProbabilities"));
             map.put("decisionEvidence", evidence);
             map.put("completeSnapshot", aiSnapshot);
-            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, exploratoryDerivativesAligned, aiAligned, aiConfidence, fundingRisk, macroBlocked);
+            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, learningScoutDerivativesAligned, aiAligned, aiConfidence, fundingRisk, macroBlocked);
             map.put("blockers", blockers);
             map.put("blockReason", allowed ? "" : String.join(" | ", blockers));
 
@@ -733,13 +747,13 @@ public class CryptoTradingService {
                 .filter(entry -> !String.valueOf(entry.getValue()).startsWith("LIVE"))
                 .map(Map.Entry::getKey).toList();
         if (!missing.isEmpty()) reasons.add("Mandatory engines unavailable: " + String.join(", ", missing));
-        if (macroBlocked) reasons.add("Macro/news risk guard blocked this direction");
+        if (macroBlocked) reasons.add("Macro/news risk is elevated; only tiny learning-scout risk is allowed when AI agrees");
         if (fundingRisk) reasons.add("Funding rate exceeds safety limit");
         if (!aligned) reasons.add("At least 2 of 3 technical timeframes do not agree");
-        if (!derivativesAligned) reasons.add("Futures/order-book/CVD confirmation is below exploratory minimum 50%");
+        if (!derivativesAligned) reasons.add("Futures/order-book/CVD confirmation is below learning-scout minimum " + LEARNING_SCOUT_MIN_DERIVATIVES + "%");
         if (!aiAligned) reasons.add("Live multi-provider AI consensus does not agree with the technical candidate");
-        if (aiConfidence < 55) reasons.add("Winning AI direction confidence is below exploratory minimum 55%");
-        if (finalScore < 58) reasons.add("Weighted all-engine score is " + finalScore + "% (exploratory minimum 58%)");
+        if (aiConfidence < LEARNING_SCOUT_MIN_AI_CONFIDENCE) reasons.add("Winning AI direction confidence is below learning-scout minimum " + LEARNING_SCOUT_MIN_AI_CONFIDENCE + "%");
+        if (finalScore < LEARNING_SCOUT_MIN_SCORE) reasons.add("Weighted all-engine score is " + finalScore + "% (learning-scout minimum " + LEARNING_SCOUT_MIN_SCORE + "%)");
         if (reasons.isEmpty()) reasons.add("Deterministic risk circuit blocked the trade");
         return reasons;
     }
