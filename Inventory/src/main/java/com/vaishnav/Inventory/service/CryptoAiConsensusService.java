@@ -19,6 +19,7 @@ public class CryptoAiConsensusService {
 
     private static final long CACHE_MS = 4 * 60 * 1000L;
     private static final int MIN_LIVE_PROVIDERS = 2;
+    private static final int MIN_LEARNING_LIVE_PROVIDERS = 1;
     private static final int MAX_PROMPT_CHARS = 9_000;
     private static final String INSTRUCTIONS = "You are a conservative crypto paper-trading risk reviewer. Analyze every supplied engine: market microstructure, technical timeframes, derivatives, liquidations, macro, published news, attributed whales, on-chain metrics, historical OHLCV analogs, stored event outcomes, risk policy, and data readiness. Compare the current numerical chart features with prior analogs, but never assume history must repeat. Strategy/MicroStrategy, BlackRock/IBIT, ETF and macro events may influence a decision only when present in attributed published data; never infer rumours or invent a pump/dump cause. A CME gap is only context when a verified CME futures feed explicitly supplies it; never score an educational-only gap. Never invent missing data. Return strict JSON with signal LONG, SHORT, or NO_TRADE; confidence 0-100; horizon SCALP, INTRADAY, or SWING; short reason; riskFlags array; and dataGaps array. Prefer NO_TRADE when mandatory data is missing or evidence conflicts. The deterministic risk engine has final authority.";
 
@@ -83,8 +84,9 @@ public class CryptoAiConsensusService {
         long noTrades = liveVotes.size() - longs - shorts;
         String majoritySignal = longs > shorts && longs > noTrades ? "LONG" : shorts > longs && shorts > noTrades ? "SHORT" : "NO_TRADE";
         boolean geminiLive = liveVotes.stream().anyMatch(v -> "Gemini".equals(v.get("ai")));
-        boolean quorumReady = liveVotes.size() >= MIN_LIVE_PROVIDERS;
-        String consensus = quorumReady ? majoritySignal : "NO_TRADE";
+        boolean strictQuorumReady = liveVotes.size() >= MIN_LIVE_PROVIDERS;
+        boolean learningQuorumReady = liveVotes.size() >= MIN_LEARNING_LIVE_PROVIDERS;
+        String consensus = learningQuorumReady ? majoritySignal : "NO_TRADE";
         double confidence = liveVotes.stream()
                 .filter(v -> majoritySignal.equals(v.get("signal")))
                 .mapToDouble(v -> toDouble(v.get("confidence")))
@@ -102,10 +104,12 @@ public class CryptoAiConsensusService {
         result.put("configuredProviders", liveVotes.size());
         result.put("liveProviders", liveVotes.size());
         result.put("requiredForConsensus", MIN_LIVE_PROVIDERS);
+        result.put("minimumForLearningTrade", MIN_LEARNING_LIVE_PROVIDERS);
         result.put("geminiRequired", false);
         result.put("geminiLive", geminiLive);
-        result.put("quorumReady", quorumReady);
-        result.put("consensusStatus", quorumReady ? "READY" : "NEED_TWO_LIVE_AI");
+        result.put("strictQuorumReady", strictQuorumReady);
+        result.put("quorumReady", learningQuorumReady);
+        result.put("consensusStatus", strictQuorumReady ? "READY_FULL_QUORUM" : learningQuorumReady ? "ONE_AI_LEARNING_MODE" : "NEED_ONE_LIVE_AI");
         result.put("longVotePercent", Math.round(longs * 100.0 / voteTotal));
         result.put("shortVotePercent", Math.round(shorts * 100.0 / voteTotal));
         result.put("noTradeVotePercent", Math.round(noTrades * 100.0 / voteTotal));
@@ -138,16 +142,19 @@ public class CryptoAiConsensusService {
     public Map<String, Object> skippedByPrefilter() {
         List<String> liveNames = healthyProviderNames();
         int configured = configuredProviderCount();
-        boolean quorumReady = liveNames.size() >= MIN_LIVE_PROVIDERS;
+        boolean strictQuorumReady = liveNames.size() >= MIN_LIVE_PROVIDERS;
+        boolean learningQuorumReady = liveNames.size() >= MIN_LEARNING_LIVE_PROVIDERS;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("signal", "NO_TRADE");
         result.put("confidence", 0);
         result.put("configuredProviders", configured);
         result.put("liveProviders", liveNames.size());
         result.put("requiredForConsensus", MIN_LIVE_PROVIDERS);
+        result.put("minimumForLearningTrade", MIN_LEARNING_LIVE_PROVIDERS);
         result.put("geminiRequired", false);
         result.put("geminiLive", liveNames.contains("Gemini"));
-        result.put("quorumReady", quorumReady);
+        result.put("strictQuorumReady", strictQuorumReady);
+        result.put("quorumReady", learningQuorumReady);
         result.put("consensusStatus", "SKIPPED_PREFILTER_LOW_QUALITY");
         result.put("longVotePercent", 0);
         result.put("shortVotePercent", 0);

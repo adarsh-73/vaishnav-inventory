@@ -26,7 +26,8 @@ public class CryptoTradingService {
     private static final double MAX_WEEKLY_LOSS_PERCENT = 8.0;
     private static final double MAX_NOTIONAL_LEVERAGE = 3.0;
     private static final int MIN_LIVE_AI_PROVIDERS = 2;
-    private static final String ENGINE_VERSION = "AEGIS_V6_LEARNING_SCOUT";
+    private static final int MIN_LEARNING_LIVE_AI_PROVIDERS = 1;
+    private static final String ENGINE_VERSION = "AEGIS_V7_AI_FALLBACK_LEARNING";
     private static final int STANDARD_MIN_SCORE = 65;
     private static final int EXPLORATORY_MIN_SCORE = 56;
     private static final int LEARNING_SCOUT_MIN_SCORE = 52;
@@ -442,6 +443,7 @@ public class CryptoTradingService {
             int aiProviderCount = (int) toDouble(aiConsensus.get("liveProviders"));
             String aiSignal = String.valueOf(aiConsensus.get("signal"));
             boolean aiQuorumReady = Boolean.TRUE.equals(aiConsensus.get("quorumReady"));
+            boolean aiStrictQuorumReady = Boolean.TRUE.equals(aiConsensus.get("strictQuorumReady"));
             boolean aiAligned = aiQuorumReady && finalSignal.equals(aiSignal);
             int aiConfidence = (int) toDouble(aiConsensus.get("confidence"));
             int aiLongAverage = (int) toDouble(aiConsensus.get("aiLongAveragePercent"));
@@ -450,11 +452,11 @@ public class CryptoTradingService {
             int longBlend = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, historicalLongScore, aiLongAverage);
             int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, aiShortAverage);
             int finalScore = "LONG".equals(finalSignal) ? longBlend : shortBlend;
-            boolean mandatoryReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady && aiQuorumReady;
-            boolean standardAllowed = mandatoryReady && aligned && finalScore >= STANDARD_MIN_SCORE && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
-            boolean exploratoryAllowed = mandatoryReady && aligned && finalScore >= EXPLORATORY_MIN_SCORE && exploratoryDerivativesAligned
+            boolean marketEnginesReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady;
+            boolean standardAllowed = marketEnginesReady && aiStrictQuorumReady && aligned && finalScore >= STANDARD_MIN_SCORE && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
+            boolean exploratoryAllowed = marketEnginesReady && aiStrictQuorumReady && aligned && finalScore >= EXPLORATORY_MIN_SCORE && exploratoryDerivativesAligned
                     && aiAligned && aiConfidence >= EXPLORATORY_MIN_AI_CONFIDENCE && !fundingRisk && !macroBlocked;
-            boolean learningScoutAllowed = mandatoryReady && aligned && finalScore >= LEARNING_SCOUT_MIN_SCORE && learningScoutDerivativesAligned
+            boolean learningScoutAllowed = marketEnginesReady && aiQuorumReady && aligned && finalScore >= LEARNING_SCOUT_MIN_SCORE && learningScoutDerivativesAligned
                     && aiAligned && aiConfidence >= LEARNING_SCOUT_MIN_AI_CONFIDENCE && !fundingRisk;
             boolean allowed = standardAllowed || exploratoryAllowed || learningScoutAllowed;
             String opportunityTier = standardAllowed ? "STANDARD" : exploratoryAllowed ? "EXPLORATORY_LEARNING" : learningScoutAllowed ? "LEARNING_SCOUT" : "BLOCKED";
@@ -504,7 +506,7 @@ public class CryptoTradingService {
             map.put("whaleBias", whaleBias);
             map.put("onChainBias", onChainBias);
             map.put("historicalBias", historicalBias);
-            map.put("dataReadiness", mandatoryReady ? "READY" : "BLOCKED_MISSING_MANDATORY_DATA");
+            map.put("dataReadiness", marketEnginesReady ? (aiQuorumReady ? "READY" : "READY_WAITING_AI") : "BLOCKED_MISSING_MANDATORY_DATA");
             Map<String, Object> futuresData = new LinkedHashMap<>();
             futuresData.put("openInterest", futures.openInterest);
             futuresData.put("openInterestValue", futures.openInterestValue);
@@ -579,9 +581,11 @@ public class CryptoTradingService {
             readiness.put("whales", attributedWhaleReady ? "LIVE_ATTRIBUTED" : exchangeWhaleProxyReady ? "LIVE_PROXY" : String.valueOf(whaleSnapshot.get("status")));
             readiness.put("onChain", onChainReady ? "LIVE" : String.valueOf(onChainSnapshot.get("status")));
             readiness.put("historical", String.valueOf(historicalPattern.get("status")));
-            readiness.put("ai", aiQuorumReady
-                    ? "LIVE (" + aiProviderCount + "/" + MIN_LIVE_AI_PROVIDERS + ")"
-                    : "NEED_2_LIVE (" + aiProviderCount + "/" + MIN_LIVE_AI_PROVIDERS + ")");
+            readiness.put("ai", aiStrictQuorumReady
+                    ? "LIVE_FULL (" + aiProviderCount + "/" + MIN_LIVE_AI_PROVIDERS + ")"
+                    : aiQuorumReady
+                    ? "LIVE_LEARNING (" + aiProviderCount + "/" + MIN_LEARNING_LIVE_AI_PROVIDERS + ")"
+                    : "NEED_1_LIVE (" + aiProviderCount + "/" + MIN_LEARNING_LIVE_AI_PROVIDERS + ")");
             map.put("providerReadiness", readiness);
             int historicalScore = "LONG".equals(finalSignal) ? historicalLongScore : historicalShortScore;
             Map<String, Object> engineScores = Map.of("technical", avgScore, "derivatives", derivativesScore, "macroNews", macroNewsScore, "whales", whaleScore, "onChain", onChainScore, "historical", historicalScore, "ai", aiConfidence);
@@ -590,15 +594,17 @@ public class CryptoTradingService {
             evidence.put("timeframesAligned", aligned);
             evidence.put("derivativesAligned", derivativesAligned);
             evidence.put("aiAligned", aiAligned);
+            evidence.put("aiLearningQuorumReady", aiQuorumReady);
+            evidence.put("aiStrictQuorumReady", aiStrictQuorumReady);
             evidence.put("fundingSafe", !fundingRisk);
             evidence.put("macroGuardSafe", !macroBlocked);
-            evidence.put("mandatoryProvidersReady", mandatoryReady);
+            evidence.put("mandatoryProvidersReady", marketEnginesReady);
             evidence.put("candidateSignal", finalSignal);
             evidence.put("finalScore", finalScore);
             evidence.put("directionProbabilities", map.get("directionProbabilities"));
             map.put("decisionEvidence", evidence);
             map.put("completeSnapshot", aiSnapshot);
-            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, learningScoutDerivativesAligned, aiAligned, aiConfidence, fundingRisk, macroBlocked);
+            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, learningScoutDerivativesAligned, aiQuorumReady, aiAligned, aiConfidence, fundingRisk, macroBlocked);
             map.put("blockers", blockers);
             map.put("blockReason", allowed ? "" : String.join(" | ", blockers));
 
@@ -834,10 +840,11 @@ public class CryptoTradingService {
     }
 
     private List<String> buildBlockReasons(Map<String, Object> readiness, boolean aligned, int finalScore,
-                                           boolean derivativesAligned, boolean aiAligned, int aiConfidence,
+                                           boolean derivativesAligned, boolean aiQuorumReady, boolean aiAligned, int aiConfidence,
                                            boolean fundingRisk, boolean macroBlocked) {
         List<String> reasons = new ArrayList<>();
         List<String> missing = readiness.entrySet().stream()
+                .filter(entry -> !"ai".equals(entry.getKey()))
                 .filter(entry -> !String.valueOf(entry.getValue()).startsWith("LIVE"))
                 .map(Map.Entry::getKey).toList();
         if (!missing.isEmpty()) reasons.add("Mandatory engines unavailable: " + String.join(", ", missing));
@@ -845,7 +852,8 @@ public class CryptoTradingService {
         if (fundingRisk) reasons.add("Funding rate exceeds safety limit");
         if (!aligned) reasons.add("At least 2 of 3 technical timeframes do not agree");
         if (!derivativesAligned) reasons.add("Futures/order-book/CVD confirmation is below learning-scout minimum " + LEARNING_SCOUT_MIN_DERIVATIVES + "%");
-        if (!aiAligned) reasons.add("Live multi-provider AI consensus does not agree with the technical candidate");
+        if (!aiQuorumReady) reasons.add("At least 1 live AI is required for learning paper trade verification");
+        if (aiQuorumReady && !aiAligned) reasons.add("Live AI verification does not agree with the technical candidate");
         if (aiConfidence < LEARNING_SCOUT_MIN_AI_CONFIDENCE) reasons.add("Winning AI direction confidence is below learning-scout minimum " + LEARNING_SCOUT_MIN_AI_CONFIDENCE + "%");
         if (finalScore < LEARNING_SCOUT_MIN_SCORE) reasons.add("Weighted all-engine score is " + finalScore + "% (learning-scout minimum " + LEARNING_SCOUT_MIN_SCORE + "%)");
         if (reasons.isEmpty()) reasons.add("Deterministic risk circuit blocked the trade");
