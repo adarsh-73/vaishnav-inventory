@@ -19,6 +19,7 @@ public class CryptoAiConsensusService {
 
     private static final long CACHE_MS = 4 * 60 * 1000L;
     private static final int MIN_LIVE_PROVIDERS = 2;
+    private static final int MAX_PROMPT_CHARS = 9_000;
     private static final String INSTRUCTIONS = "You are a conservative crypto paper-trading risk reviewer. Analyze every supplied engine: market microstructure, technical timeframes, derivatives, liquidations, macro, published news, attributed whales, on-chain metrics, historical OHLCV analogs, stored event outcomes, risk policy, and data readiness. Compare the current numerical chart features with prior analogs, but never assume history must repeat. Strategy/MicroStrategy, BlackRock/IBIT, ETF and macro events may influence a decision only when present in attributed published data; never infer rumours or invent a pump/dump cause. A CME gap is only context when a verified CME futures feed explicitly supplies it; never score an educational-only gap. Never invent missing data. Return strict JSON with signal LONG, SHORT, or NO_TRADE; confidence 0-100; horizon SCALP, INTRADAY, or SWING; short reason; riskFlags array; and dataGaps array. Prefer NO_TRADE when mandatory data is missing or evidence conflicts. The deterministic risk engine has final authority.";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -56,7 +57,14 @@ public class CryptoAiConsensusService {
         List<Map<String, Object>> votes = new ArrayList<>();
         String prompt;
         try {
-            prompt = "Symbol: " + symbol + "\nReal market snapshot:\n" + objectMapper.writeValueAsString(snapshot);
+            String json = objectMapper.writeValueAsString(snapshot);
+            if (json.length() > MAX_PROMPT_CHARS) {
+                json = json.substring(0, MAX_PROMPT_CHARS)
+                        + "\n...TRUNCATED_BY_BACKEND_PROMPT_GUARD. Use only visible data and mark missing details in dataGaps.";
+            }
+            prompt = "Symbol: " + symbol
+                    + "\nPaper-trading review only. Return JSON only."
+                    + "\nReal compact market snapshot:\n" + json;
         } catch (Exception error) {
             prompt = "Symbol: " + symbol + "\nSnapshot unavailable";
         }

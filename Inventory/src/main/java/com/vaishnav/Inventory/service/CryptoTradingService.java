@@ -390,11 +390,11 @@ public class CryptoTradingService {
             aiSnapshot.put("symbol", symbol);
             aiSnapshot.put("candidateSignal", finalSignal);
             aiSnapshot.put("marketMicrostructure", marketSnapshot);
-            aiSnapshot.put("technicalTimeframes", Map.of("15m", a15, "1h", a1h, "4h", a4h));
-            aiSnapshot.put("macroAndPublishedNews", macroNews);
-            aiSnapshot.put("attributedWhales", whaleSnapshot);
-            aiSnapshot.put("onChain", onChainSnapshot);
-            aiSnapshot.put("historicalPatternAndEventMemory", historicalMemory);
+            aiSnapshot.put("technicalTimeframes", compactTimeframes(a15, a1h, a4h));
+            aiSnapshot.put("macroAndPublishedNews", compactMacroNews(macroNews));
+            aiSnapshot.put("attributedWhales", compactProviderSnapshot(whaleSnapshot));
+            aiSnapshot.put("onChain", compactProviderSnapshot(onChainSnapshot));
+            aiSnapshot.put("historicalPatternAndEventMemory", compactHistoricalMemory(historicalMemory));
             aiSnapshot.put("riskPolicy", Map.of(
                     "maxRiskPerTradePercent", MAX_RISK_PER_TRADE_PERCENT,
                     "maxDailyLossPercent", MAX_DAILY_LOSS_PERCENT,
@@ -656,6 +656,100 @@ public class CryptoTradingService {
         row.put("indicatorCount", analysis.get("indicatorCount"));
         row.put("indicators", analysis.get("indicators"));
         return row;
+    }
+
+    private Map<String, Object> compactTimeframes(Map<String, Object> a15, Map<String, Object> a1h, Map<String, Object> a4h) {
+        Map<String, Object> compact = new LinkedHashMap<>();
+        compact.put("15m", compactTimeframe(a15));
+        compact.put("1h", compactTimeframe(a1h));
+        compact.put("4h", compactTimeframe(a4h));
+        return compact;
+    }
+
+    private Map<String, Object> compactTimeframe(Map<String, Object> analysis) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        for (String key : List.of(
+                "signal", "score", "lastClose", "rsi14", "macd", "macdSignal", "macdHistogram",
+                "ema20", "ema50", "ema200", "sma20", "sma50", "sma200", "vwap48",
+                "bollingerPosition", "bollingerBandwidth", "atr14", "adx14", "plusDI14", "minusDI14",
+                "roc10", "momentum10", "volumeRatio20", "priceVsVwapPercent", "bullish", "bearish"
+        )) {
+            if (analysis.containsKey(key)) row.put(key, analysis.get(key));
+        }
+        return row;
+    }
+
+    private Map<String, Object> compactMacroNews(Map<String, Object> macro) {
+        Map<String, Object> compact = new LinkedHashMap<>();
+        for (String key : List.of(
+                "status", "risk", "macroBias", "headlineRiskCount", "headlinePositiveCount",
+                "newsSentimentScore", "newsSource", "macroSource", "futureNewsDisclaimer"
+        )) {
+            if (macro.containsKey(key)) compact.put(key, macro.get(key));
+        }
+        Map<String, Object> assets = new LinkedHashMap<>();
+        for (String key : List.of("sp500", "nasdaq", "vix", "dxy", "us10y", "gold", "oil")) {
+            Object raw = macro.get(key);
+            if (raw instanceof Map<?, ?> value) assets.put(key, compactMap(value, List.of("status", "source", "proxySymbol", "changePercent", "price")));
+        }
+        compact.put("assets", assets);
+        if (macro.get("newsSourceStatus") instanceof Map<?, ?> status) compact.put("newsSourceStatus", status);
+        if (macro.get("headlines") instanceof List<?> headlines) {
+            compact.put("topHeadlines", compactList(headlines, 6, List.of("title", "source", "publishedAt", "sentiment", "sentimentLabel", "highImpact")));
+        }
+        return compact;
+    }
+
+    private Map<String, Object> compactProviderSnapshot(Map<String, Object> snapshot) {
+        Map<String, Object> compact = new LinkedHashMap<>();
+        for (String key : List.of(
+                "status", "source", "bias", "score", "netFlow", "netflow", "exchangeReserve",
+                "whaleRatio", "stablecoinSupplyRatio", "largeTransferCount", "buyNotional",
+                "sellNotional", "inflow", "outflow", "fetchedAt"
+        )) {
+            if (snapshot.containsKey(key)) compact.put(key, snapshot.get(key));
+        }
+        for (String listKey : List.of("events", "transfers", "alerts", "topTransfers", "wallets", "metrics")) {
+            if (snapshot.get(listKey) instanceof List<?> rows) {
+                compact.put(listKey, compactList(rows, 8, List.of(
+                        "symbol", "asset", "amount", "amountUsd", "usd", "from", "to", "direction",
+                        "type", "source", "bias", "timestamp", "label", "entity", "metric", "value"
+                )));
+            }
+        }
+        return compact;
+    }
+
+    private Map<String, Object> compactHistoricalMemory(Map<String, Object> memory) {
+        Map<String, Object> compact = new LinkedHashMap<>();
+        for (String key : List.of("status", "source", "bias", "score", "samples", "matchedEvents", "fetchedAt")) {
+            if (memory.containsKey(key)) compact.put(key, memory.get(key));
+        }
+        Object pattern = memory.get("pricePattern");
+        if (pattern instanceof Map<?, ?> value) compact.put("pricePattern", compactMap(value, List.of("status", "bias", "confidence", "similarity", "samples", "reason")));
+        Object events = memory.get("eventMemory");
+        if (events instanceof Map<?, ?> value) compact.put("eventMemory", compactMap(value, List.of("status", "bias", "samples", "winRate", "averageMovePercent", "reason")));
+        return compact;
+    }
+
+    private List<Map<String, Object>> compactList(List<?> rows, int limit, List<String> keys) {
+        List<Map<String, Object>> compact = new ArrayList<>();
+        for (Object row : rows) {
+            if (compact.size() >= limit) break;
+            if (row instanceof Map<?, ?> map) compact.add(compactMap(map, keys));
+            else if (row != null) compact.add(Map.of("value", truncate(String.valueOf(row), 180)));
+        }
+        return compact;
+    }
+
+    private Map<String, Object> compactMap(Map<?, ?> source, List<String> keys) {
+        Map<String, Object> compact = new LinkedHashMap<>();
+        for (String key : keys) {
+            if (!source.containsKey(key)) continue;
+            Object value = source.get(key);
+            compact.put(key, value instanceof String text ? truncate(text, 220) : value);
+        }
+        return compact;
     }
 
     private int derivativesScore(String signal, CryptoMarketDataService.FuturesStats futures) {
