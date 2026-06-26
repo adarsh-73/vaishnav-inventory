@@ -43,7 +43,7 @@ public class CryptoAiConsensusService {
     @Value("${MISTRAL_API_KEY:}") private String mistralKey;
     @Value("${MISTRAL_MODEL:mistral-small-latest}") private String mistralModel;
     @Value("${OPENROUTER_API_KEY:}") private String openRouterKey;
-    @Value("${OPENROUTER_MODEL:meta-llama/llama-3.1-8b-instruct:free}") private String openRouterModel;
+    @Value("${OPENROUTER_MODEL:openrouter/free}") private String openRouterModel;
     @Value("${OPENROUTER_MODELS:}") private String openRouterModels;
 
     public CryptoAiConsensusService() {
@@ -436,7 +436,15 @@ public class CryptoAiConsensusService {
         if (openRouterModel != null && !openRouterModel.isBlank() && !models.contains(openRouterModel.trim())) {
             models.add(openRouterModel.trim());
         }
-        if (models.isEmpty()) models.add("meta-llama/llama-3.1-8b-instruct:free");
+        for (String fallback : List.of(
+                "openrouter/free",
+                "openai/gpt-oss-120b:free",
+                "meta-llama/llama-3.3-70b-instruct:free",
+                "qwen/qwen3-next-80b-a3b-instruct:free",
+                "google/gemma-4-31b-it:free"
+        )) {
+            if (!models.contains(fallback)) models.add(fallback);
+        }
         return models;
     }
 
