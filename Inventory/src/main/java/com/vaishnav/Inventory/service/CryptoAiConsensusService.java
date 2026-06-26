@@ -42,6 +42,9 @@ public class CryptoAiConsensusService {
     @Value("${CEREBRAS_MODEL:gpt-oss-120b}") private String cerebrasModel;
     @Value("${MISTRAL_API_KEY:}") private String mistralKey;
     @Value("${MISTRAL_MODEL:mistral-small-latest}") private String mistralModel;
+    @Value("${OPENROUTER_API_KEY:}") private String openRouterKey;
+    @Value("${OPENROUTER_MODEL:meta-llama/llama-3.1-8b-instruct:free}") private String openRouterModel;
+    @Value("${OPENROUTER_MODELS:}") private String openRouterModels;
 
     public CryptoAiConsensusService() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -77,6 +80,7 @@ public class CryptoAiConsensusService {
         votes.add(groqKey.isBlank() ? notConfigured("Groq Llama", "GROQ_API_KEY") : callOpenAiCompatible("Groq Llama", groqModel, groqKey, "https://api.groq.com/openai/v1/chat/completions", prompt));
         votes.add(cerebrasKey.isBlank() ? notConfigured("Cerebras GPT-OSS", "CEREBRAS_API_KEY") : callOpenAiCompatible("Cerebras GPT-OSS", cerebrasModel, cerebrasKey, "https://api.cerebras.ai/v1/chat/completions", prompt));
         votes.add(mistralKey.isBlank() ? notConfigured("Mistral", "MISTRAL_API_KEY") : callOpenAiCompatible("Mistral", mistralModel, mistralKey, "https://api.mistral.ai/v1/chat/completions", prompt));
+        votes.add(openRouterKey.isBlank() ? notConfigured("OpenRouter", "OPENROUTER_API_KEY") : callOpenRouter(prompt));
 
         List<Map<String, Object>> liveVotes = votes.stream().filter(v -> "LIVE".equals(v.get("status"))).toList();
         long longs = liveVotes.stream().filter(v -> "LONG".equals(v.get("signal"))).count();
@@ -136,6 +140,7 @@ public class CryptoAiConsensusService {
         status.put("Groq", providerConfig("Groq Llama", !groqKey.isBlank(), groqModel, "GROQ_API_KEY"));
         status.put("Cerebras", providerConfig("Cerebras GPT-OSS", !cerebrasKey.isBlank(), cerebrasModel, "CEREBRAS_API_KEY"));
         status.put("Mistral", providerConfig("Mistral", !mistralKey.isBlank(), mistralModel, "MISTRAL_API_KEY"));
+        status.put("OpenRouter", providerConfig("OpenRouter", !openRouterKey.isBlank(), activeOpenRouterModelsLabel(), "OPENROUTER_API_KEY"));
         return status;
     }
 
@@ -202,6 +207,7 @@ public class CryptoAiConsensusService {
         if (!groqKey.isBlank()) count++;
         if (!cerebrasKey.isBlank()) count++;
         if (!mistralKey.isBlank()) count++;
+        if (!openRouterKey.isBlank()) count++;
         return count;
     }
 
@@ -374,6 +380,68 @@ public class CryptoAiConsensusService {
         } catch (Exception error) {
             return providerError(provider, model, error);
         }
+    }
+
+    private Map<String, Object> callOpenRouter(String prompt) {
+        Map<String, Object> cooldown = cooldownVote("OpenRouter", activeOpenRouterModelsLabel());
+        if (cooldown != null) return cooldown;
+
+        Exception lastError = null;
+        List<String> models = activeOpenRouterModels();
+        for (String model : models) {
+            try {
+                return callOpenRouterModel(model, prompt, true);
+            } catch (Exception firstError) {
+                lastError = firstError;
+                try {
+                    return callOpenRouterModel(model, prompt, false);
+                } catch (Exception fallbackError) {
+                    lastError = fallbackError;
+                }
+            }
+        }
+        return providerError("OpenRouter", String.join(" -> ", models), lastError == null ? new RuntimeException("All OpenRouter models failed") : lastError);
+    }
+
+    private Map<String, Object> callOpenRouterModel(String model, String prompt, boolean jsonMode) throws Exception {
+        HttpHeaders headers = jsonHeaders();
+        headers.setBearerAuth(openRouterKey);
+        headers.set("HTTP-Referer", "https://vaishnav-inventory-frontend.onrender.com");
+        headers.set("X-Title", "Vaishnav Inventory Crypto Paper Trader");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", INSTRUCTIONS),
+                Map.of("role", "user", "content", prompt + (jsonMode ? "" : "\nReturn only one compact JSON object."))
+        ));
+        if (jsonMode) body.put("response_format", Map.of("type", "json_object"));
+        body.put("max_tokens", 500);
+        body.put("temperature", 0.1);
+        body.put("stream", false);
+        JsonNode root = exchange("https://openrouter.ai/api/v1/chat/completions", headers, body);
+        String text = root.path("choices").path(0).path("message").path("content").asText();
+        Map<String, Object> vote = parseVote("OpenRouter", model, text);
+        vote.put("jsonMode", jsonMode);
+        return vote;
+    }
+
+    private List<String> activeOpenRouterModels() {
+        List<String> models = new ArrayList<>();
+        if (openRouterModels != null && !openRouterModels.isBlank()) {
+            for (String model : openRouterModels.split(",")) {
+                String trimmed = model.trim();
+                if (!trimmed.isBlank() && !models.contains(trimmed)) models.add(trimmed);
+            }
+        }
+        if (openRouterModel != null && !openRouterModel.isBlank() && !models.contains(openRouterModel.trim())) {
+            models.add(openRouterModel.trim());
+        }
+        if (models.isEmpty()) models.add("meta-llama/llama-3.1-8b-instruct:free");
+        return models;
+    }
+
+    private String activeOpenRouterModelsLabel() {
+        return String.join(" -> ", activeOpenRouterModels());
     }
 
     private JsonNode exchange(String url, HttpHeaders headers, Object body) throws Exception {
