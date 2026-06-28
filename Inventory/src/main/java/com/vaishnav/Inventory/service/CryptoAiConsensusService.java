@@ -12,12 +12,13 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.time.Instant;
 
 @Service
 public class CryptoAiConsensusService {
 
-    private static final long CACHE_MS = 4 * 60 * 1000L;
+    private static final long CACHE_MS = 20 * 60 * 1000L;
     private static final int MIN_LIVE_PROVIDERS = 2;
     private static final int MIN_LEARNING_LIVE_PROVIDERS = 1;
     private static final int MAX_PROMPT_CHARS = 9_000;
@@ -73,14 +74,10 @@ public class CryptoAiConsensusService {
             prompt = "Symbol: " + symbol + "\nSnapshot unavailable";
         }
 
-        votes.add(openAiKey.isBlank() ? notConfigured("ChatGPT", "OPENAI_API_KEY") : callOpenAi(prompt));
-        votes.add(geminiKey.isBlank() ? notConfigured("Gemini", "GEMINI_API_KEY") : callGemini(prompt));
-        votes.add(anthropicKey.isBlank() ? notConfigured("Claude", "ANTHROPIC_API_KEY") : callAnthropic(prompt));
-        votes.add(deepSeekKey.isBlank() ? notConfigured("DeepSeek", "DEEPSEEK_API_KEY") : callDeepSeek(prompt));
-        votes.add(groqKey.isBlank() ? notConfigured("Groq Llama", "GROQ_API_KEY") : callOpenAiCompatible("Groq Llama", groqModel, groqKey, "https://api.groq.com/openai/v1/chat/completions", prompt));
-        votes.add(cerebrasKey.isBlank() ? notConfigured("Cerebras GPT-OSS", "CEREBRAS_API_KEY") : callOpenAiCompatible("Cerebras GPT-OSS", cerebrasModel, cerebrasKey, "https://api.cerebras.ai/v1/chat/completions", prompt));
-        votes.add(mistralKey.isBlank() ? notConfigured("Mistral", "MISTRAL_API_KEY") : callOpenAiCompatible("Mistral", mistralModel, mistralKey, "https://api.mistral.ai/v1/chat/completions", prompt));
-        votes.add(openRouterKey.isBlank() ? notConfigured("OpenRouter", "OPENROUTER_API_KEY") : callOpenRouter(prompt));
+        double preAiQuality = Math.max(toDouble(snapshot.get("preAiLongScore")), toDouble(snapshot.get("preAiShortScore")));
+        int targetLiveProviders = "AI_PROVIDER_HEALTHCHECK".equals(symbol) || preAiQuality >= 65
+                ? MIN_LIVE_PROVIDERS : MIN_LEARNING_LIVE_PROVIDERS;
+        votes.addAll(collectProviderVotes(symbol, prompt, targetLiveProviders));
 
         List<Map<String, Object>> liveVotes = votes.stream().filter(v -> "LIVE".equals(v.get("status"))).toList();
         long longs = liveVotes.stream().filter(v -> "LONG".equals(v.get("signal"))).count();
@@ -126,6 +123,8 @@ public class CryptoAiConsensusService {
         result.put("votes", votes);
         result.put("source", liveVotes.isEmpty() ? "NO_LIVE_LLM_APIS" : "REAL_PROVIDER_APIS");
         result.put("marketReviewPerformed", true);
+        result.put("providerCallsTarget", targetLiveProviders);
+        result.put("quotaPolicy", "ROTATE_CONFIGURED_PROVIDERS_AND_STOP_AFTER_REQUIRED_LIVE_VOTES");
         result.put("cachedForSeconds", CACHE_MS / 1000);
         cache.put(cacheKey, new CachedConsensus(System.currentTimeMillis(), result));
         return result;
@@ -272,6 +271,57 @@ public class CryptoAiConsensusService {
         } catch (Exception error) {
             return providerError("ChatGPT", openAiModel, error);
         }
+    }
+
+    private List<Map<String, Object>> collectProviderVotes(String symbol, String prompt, int targetLiveProviders) {
+        List<ProviderCandidate> candidates = List.of(
+                new ProviderCandidate("Mistral", !mistralKey.isBlank(), "MISTRAL_API_KEY",
+                        () -> callOpenAiCompatible("Mistral", mistralModel, mistralKey, "https://api.mistral.ai/v1/chat/completions", prompt)),
+                new ProviderCandidate("OpenRouter", !openRouterKey.isBlank(), "OPENROUTER_API_KEY",
+                        () -> callOpenRouter(prompt)),
+                new ProviderCandidate("Cerebras GPT-OSS", !cerebrasKey.isBlank(), "CEREBRAS_API_KEY",
+                        () -> callOpenAiCompatible("Cerebras GPT-OSS", cerebrasModel, cerebrasKey, "https://api.cerebras.ai/v1/chat/completions", prompt)),
+                new ProviderCandidate("Groq Llama", !groqKey.isBlank(), "GROQ_API_KEY",
+                        () -> callOpenAiCompatible("Groq Llama", groqModel, groqKey, "https://api.groq.com/openai/v1/chat/completions", prompt)),
+                new ProviderCandidate("Gemini", !geminiKey.isBlank(), "GEMINI_API_KEY",
+                        () -> callGemini(prompt)),
+                new ProviderCandidate("DeepSeek", !deepSeekKey.isBlank(), "DEEPSEEK_API_KEY",
+                        () -> callDeepSeek(prompt)),
+                new ProviderCandidate("ChatGPT", !openAiKey.isBlank(), "OPENAI_API_KEY",
+                        () -> callOpenAi(prompt)),
+                new ProviderCandidate("Claude", !anthropicKey.isBlank(), "ANTHROPIC_API_KEY",
+                        () -> callAnthropic(prompt))
+        );
+
+        int start = "AI_PROVIDER_HEALTHCHECK".equals(symbol) ? 0 : Math.floorMod(symbol.hashCode(), candidates.size());
+        List<Map<String, Object>> votes = new ArrayList<>();
+        int liveVotes = 0;
+        for (int offset = 0; offset < candidates.size(); offset++) {
+            ProviderCandidate candidate = candidates.get((start + offset) % candidates.size());
+            if (!candidate.configured) {
+                votes.add(notConfigured(candidate.name, candidate.keyName));
+                continue;
+            }
+            if (liveVotes >= targetLiveProviders) {
+                votes.add(quotaProtected(candidate.name));
+                continue;
+            }
+            Map<String, Object> vote = candidate.caller.get();
+            votes.add(vote);
+            if ("LIVE".equals(vote.get("status"))) liveVotes++;
+        }
+        return votes;
+    }
+
+    private Map<String, Object> quotaProtected(String provider) {
+        return Map.of(
+                "ai", provider,
+                "status", "QUOTA_PROTECTED",
+                "verification", "API_CALL_SKIPPED_QUORUM_READY",
+                "signal", "NO_VOTE",
+                "confidence", 0,
+                "reason", "Required live AI votes already collected; free quota preserved"
+        );
     }
 
     private Map<String, Object> callGemini(String prompt) {
@@ -491,7 +541,12 @@ public class CryptoAiConsensusService {
     private Map<String, Object> providerError(String provider, String model, Exception error) {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         if (message.length() > 180) message = message.substring(0, 180);
-        long cooldownMs = message.contains("429") || message.toLowerCase(Locale.ROOT).contains("too many requests")
+        String lowerMessage = message.toLowerCase(Locale.ROOT);
+        long cooldownMs = lowerMessage.contains("per-day")
+                ? 24 * 60 * 60 * 1000L
+                : message.contains("402") || lowerMessage.contains("insufficient balance")
+                ? 6 * 60 * 60 * 1000L
+                : message.contains("429") || lowerMessage.contains("too many requests")
                 ? 30 * 60 * 1000L : 2 * 60 * 1000L;
         providerHealth.put(provider, new ProviderHealth("ERROR", Instant.now().toString(), message, System.currentTimeMillis() + cooldownMs));
         return Map.of("ai", provider, "model", model, "status", "ERROR", "verification", "API_CALL_FAILED", "signal", "NO_VOTE", "confidence", 0, "reason", message);
@@ -520,4 +575,5 @@ public class CryptoAiConsensusService {
 
     private record CachedConsensus(long createdAt, Map<String, Object> value) {}
     private record ProviderHealth(String status, String checkedAt, String error, long cooldownUntil) {}
+    private record ProviderCandidate(String name, boolean configured, String keyName, Supplier<Map<String, Object>> caller) {}
 }
