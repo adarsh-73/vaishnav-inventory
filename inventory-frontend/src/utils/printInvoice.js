@@ -25,12 +25,12 @@ export function printInvoiceElement(elementId, title = "Vaishnav Premium Invoice
             width: 194mm !important;
             min-width: 194mm !important;
             max-width: 194mm !important;
-            height: 281mm !important;
+            height: auto !important;
             min-height: 281mm !important;
-            max-height: 281mm !important;
+            max-height: none !important;
             margin: 0 auto !important;
             padding: 10mm 9mm 5mm !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             background: #fff !important;
             border: 1.2mm double #0f2963 !important;
             border-radius: 2mm !important;
@@ -50,7 +50,7 @@ export function printInvoiceElement(elementId, title = "Vaishnav Premium Invoice
             .invoice-print-sheet, #old-bill-print-sheet { box-shadow: 0 18px 45px rgba(15,23,42,.18) !important; }
           }
           @media print {
-            html, body { width: 194mm !important; height: 281mm !important; background: #fff !important; }
+            html, body { width: 194mm !important; min-height: 281mm !important; background: #fff !important; }
             body { display: block !important; }
           }
         </style>

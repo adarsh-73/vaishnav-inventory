@@ -122,8 +122,9 @@ export default function VaishnavFinalInvoice() {
   const discountValue = Math.min(Number(discountAmount || 0), subTotalAmount);
   const totalAmount = Math.max(0, subTotalAmount - discountValue);
   const billSplit = useMemo(() => getInvoiceCategoryTotals({ items, discountAmount: discountValue }), [items, discountValue]);
-  const paidValue = paidAmount === "" ? totalAmount : Number(paidAmount || 0);
+  const paidValue = Math.min(totalAmount, Math.max(0, paidAmount === "" ? totalAmount : Number(paidAmount || 0)));
   const remainingAmount = Math.max(totalAmount - paidValue, 0);
+  const qrPayableAmount = remainingAmount;
 
   const qrData = useMemo(() => {
     const params = new URLSearchParams({
@@ -133,12 +134,12 @@ export default function VaishnavFinalInvoice() {
       tn: `Bill ${billNo || ""}`.trim()
     });
 
-    if (totalAmount > 0) {
-      params.set("am", totalAmount.toFixed(2));
+    if (qrPayableAmount > 0) {
+      params.set("am", qrPayableAmount.toFixed(2));
     }
 
     return `upi://pay?${params.toString()}`;
-  }, [billNo, totalAmount, upiId]);
+  }, [billNo, qrPayableAmount, upiId]);
 
   const qrSrc = qrImage || `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(qrData)}`;
 
@@ -168,7 +169,9 @@ export default function VaishnavFinalInvoice() {
     clone.style.margin = "0";
     clone.style.boxShadow = "none";
     clone.style.width = "210mm";
-    clone.style.height = "297mm";
+    clone.style.height = "auto";
+    clone.style.minHeight = "297mm";
+    clone.style.overflow = "visible";
     document.body.appendChild(clone);
 
     try {
@@ -270,7 +273,7 @@ export default function VaishnavFinalInvoice() {
     const nextSubTotalAmount = nextItems.reduce((sum, item) => sum + (item.qty * item.rate), 0);
     const nextDiscountValue = Math.min(Number(discountAmount || 0), nextSubTotalAmount);
     const nextTotalAmount = Math.max(0, nextSubTotalAmount - nextDiscountValue);
-    const nextPaidValue = paidAmount === "" ? nextTotalAmount : Number(paidAmount || 0);
+    const nextPaidValue = Math.min(nextTotalAmount, Math.max(0, paidAmount === "" ? nextTotalAmount : Number(paidAmount || 0)));
     const nextRemainingAmount = Math.max(nextTotalAmount - nextPaidValue, 0);
     const invoiceItemsPayload = nextItems.map((item) => ({
       productInvoiceitem: item.autoCreateProduct ? null : item.productId ? { id: item.productId } : null,
@@ -524,14 +527,15 @@ export default function VaishnavFinalInvoice() {
             left: 0 !important;
             top: 0 !important;
             width: 196mm !important;
-            height: 283mm !important;
+            height: auto !important;
+            min-height: 283mm !important;
             margin: 0 !important;
             box-shadow: none !important;
             border: 1mm double #0F2963 !important;
             border-radius: 2mm !important;
             padding: 7mm 9mm 6mm !important;
             box-sizing: border-box !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -816,7 +820,9 @@ export default function VaishnavFinalInvoice() {
         <div style={styles.gatewaysOuterShellContainerFrame}>
           
           <div style={styles.qrBlockUnitContainerColumn}>
-            <div style={styles.qrTopLabelPillText}>SCAN &amp; PAY</div>
+            <div style={styles.qrTopLabelPillText}>
+              {qrPayableAmount > 0 ? `PAY BALANCE ₹ ${qrPayableAmount}` : "PAYMENT COMPLETE"}
+            </div>
             <div style={styles.qrGraphicWhiteOuterFrameBox}>
               
               {/* Dynamic Timestamp url automatic load karega bina purani memory fassaye */}
