@@ -12,6 +12,7 @@ import Attendance from "./pages/Attendance";
 import OldBills from "./pages/OldBills";
 import MonthlyStatement from "./pages/MonthlyStatement";
 import CryptoTrading from "./pages/CryptoTrading";
+import AccessoryCatalog from "./pages/AccessoryCatalog";
 
 const APP_PASSWORD = process.env.REACT_APP_APP_PASSWORD || "vaishnav";
 
@@ -30,6 +31,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/accessories-catalog" element={<AccessoryCatalog />} />
             <Route path="/purchase" element={<Purchase />} />
             <Route path="/billing" element={<BillingPage />} />   {/* ← Yeh change kiya */}
             <Route path="/old-bills" element={<OldBills />} />
