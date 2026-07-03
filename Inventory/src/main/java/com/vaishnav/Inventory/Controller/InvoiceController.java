@@ -50,7 +50,8 @@ public class InvoiceController {
         LocalDate monthStart = LocalDate.now(ZoneId.of("Asia/Kolkata")).withDayOfMonth(1);
         LocalDateTime start = monthStart.atStartOfDay();
         LocalDateTime end = monthStart.plusMonths(1).atStartOfDay();
-        return invoiceRepository.findForPeriod(start, end);
+        return invoiceRepository
+                .findByInvoiceDateGreaterThanEqualAndInvoiceDateLessThanOrderByInvoiceDateDesc(start, end);
     }
 
     @GetMapping("/{id}")
