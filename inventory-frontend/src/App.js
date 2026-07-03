@@ -1,18 +1,19 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Sidebar from "./Components/Sidebar";
-import Dashboard from "./pages/Dashboard";
-import Products from "./pages/Product";
-import Purchase from "./pages/Purchase";
-import BillingPage from "./pages/BillingPage";     // ← Correct Import
-import Quotation from "./pages/Quotation";
-import SellingItem from "./pages/Selling-Item";
-import DailyBook from "./pages/DailyBook";
-import Attendance from "./pages/Attendance";
-import OldBills from "./pages/OldBills";
-import MonthlyStatement from "./pages/MonthlyStatement";
-import CryptoTrading from "./pages/CryptoTrading";
-import AccessoryCatalog from "./pages/AccessoryCatalog";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Products = lazy(() => import("./pages/Product"));
+const Purchase = lazy(() => import("./pages/Purchase"));
+const BillingPage = lazy(() => import("./pages/BillingPage"));
+const Quotation = lazy(() => import("./pages/Quotation"));
+const SellingItem = lazy(() => import("./pages/Selling-Item"));
+const DailyBook = lazy(() => import("./pages/DailyBook"));
+const Attendance = lazy(() => import("./pages/Attendance"));
+const OldBills = lazy(() => import("./pages/OldBills"));
+const MonthlyStatement = lazy(() => import("./pages/MonthlyStatement"));
+const CryptoTrading = lazy(() => import("./pages/CryptoTrading"));
+const AccessoryCatalog = lazy(() => import("./pages/AccessoryCatalog"));
 
 const APP_PASSWORD = process.env.REACT_APP_APP_PASSWORD || "vaishnav";
 
@@ -28,20 +29,22 @@ function App() {
       <div className="app-shell" style={{ display: "flex" }}>
         <Sidebar />
         <div className="app-content" style={{ flex: 1 }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/products" element={<Products />} />
-            <Route path="/accessories-catalog" element={<AccessoryCatalog />} />
-            <Route path="/purchase" element={<Purchase />} />
-            <Route path="/billing" element={<BillingPage />} />   {/* ← Yeh change kiya */}
-            <Route path="/old-bills" element={<OldBills />} />
-            <Route path="/monthly-statement" element={<MonthlyStatement />} />
-            <Route path="/crypto-trading" element={<CryptoTrading />} />
-            <Route path="/quotation" element={<Quotation />} />
-            <Route path="/selling-item" element={<SellingItem />} />
-            <Route path="/daily-book" element={<DailyBook />} />
-            <Route path="/attendance" element={<Attendance />} />
-          </Routes>
+          <Suspense fallback={<div className="route-loading">Loading...</div>}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/products" element={<Products />} />
+              <Route path="/accessories-catalog" element={<AccessoryCatalog />} />
+              <Route path="/purchase" element={<Purchase />} />
+              <Route path="/billing" element={<BillingPage />} />
+              <Route path="/old-bills" element={<OldBills />} />
+              <Route path="/monthly-statement" element={<MonthlyStatement />} />
+              <Route path="/crypto-trading" element={<CryptoTrading />} />
+              <Route path="/quotation" element={<Quotation />} />
+              <Route path="/selling-item" element={<SellingItem />} />
+              <Route path="/daily-book" element={<DailyBook />} />
+              <Route path="/attendance" element={<Attendance />} />
+            </Routes>
+          </Suspense>
         </div>
       </div>
     </BrowserRouter>

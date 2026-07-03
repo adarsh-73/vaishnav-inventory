@@ -257,6 +257,19 @@
   display: block;
 }
 
+.catalog-verification {
+  color: #9a5b12 !important;
+  font-weight: 800;
+}
+
+.catalog-source-link {
+  display: block;
+  margin-top: 5px;
+  color: #0f2963;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .catalog-product-cell strong {
   color: #071635;
   font-size: 14px;

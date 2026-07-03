@@ -14,8 +14,8 @@ function Dashboard() {
     try {
       const [productsData, dailyBookData, invoicesData] = await Promise.all([
         apiRequest("/products"),
-        apiRequest("/daily-book"),
-        apiRequest("/invoices")
+        apiRequest("/daily-book/current-month"),
+        apiRequest("/invoices/current-month")
       ]);
 
       setProducts(Array.isArray(productsData) ? productsData : []);

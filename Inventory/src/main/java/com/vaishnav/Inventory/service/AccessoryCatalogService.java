@@ -31,6 +31,7 @@ public class AccessoryCatalogService {
 
     private static final List<String> IMPORT_HEADERS = List.of(
             "Name", "Local Name", "Brand", "Category", "Part Type", "HSN Code",
+            "OEM Part Number", "Aftermarket Part Number", "Source URL", "Verification Status",
             "Wholesale Price", "Retail Price", "Bargaining Price", "Stock Quantity",
             "Minimum Stock", "Barcode", "Supplier", "Supplier Phone", "Photo URL",
             "Fitments", "Notes"
@@ -85,6 +86,8 @@ public class AccessoryCatalogService {
         existing.setBrand(request.getBrand());
         existing.setCategory(request.getCategory());
         existing.setPartType(request.getPartType());
+        existing.setOemPartNumber(request.getOemPartNumber());
+        existing.setAftermarketPartNumber(request.getAftermarketPartNumber());
         existing.setHsnCode(request.getHsnCode());
         existing.setSupplier(request.getSupplier());
         existing.setSupplierPhone(request.getSupplierPhone());
@@ -94,6 +97,9 @@ public class AccessoryCatalogService {
         existing.setStockQuantity(request.getStockQuantity());
         existing.setMinimumStock(request.getMinimumStock());
         existing.setPhotoUrl(request.getPhotoUrl());
+        existing.setSourceUrl(request.getSourceUrl());
+        existing.setVerificationStatus(request.getVerificationStatus());
+        existing.setSourceCheckedAt(request.getSourceCheckedAt());
         existing.setNotes(request.getNotes());
         existing.setActive(request.getActive() == null ? existing.getActive() : request.getActive());
         if (hasText(request.getSku())) existing.setSku(request.getSku().trim());
@@ -191,6 +197,7 @@ public class AccessoryCatalogService {
     public String csvTemplate() {
         return String.join(",", IMPORT_HEADERS) + "\n"
                 + "\"Fogg Light\",\"Fog light\",\"Uno Minda\",\"Lighting\",\"Aftermarket\",\"851220\","
+                + "\"\",\"VA-AFT-001\",\"https://supplier.example/item\",\"SUPPLIER_VERIFIED\","
                 + "\"900\",\"1450\",\"1250\",\"0\",\"1\",\"\",\"Vaishnav Supplier\",\"\","
                 + "\"https://example.com/photo.jpg\",\"Mahindra|Bolero|All|2016|2026;Mahindra|Scorpio|S3|2018|2022\","
                 + "\"Verified supplier price\"\n";
@@ -214,6 +221,8 @@ public class AccessoryCatalogService {
                         builder.like(builder.lower(root.get("brand")), like),
                         builder.like(builder.lower(root.get("category")), like),
                         builder.like(builder.lower(root.get("partType")), like),
+                        builder.like(builder.lower(root.get("oemPartNumber")), like),
+                        builder.like(builder.lower(root.get("aftermarketPartNumber")), like),
                         builder.like(builder.lower(root.get("hsnCode")), like),
                         builder.like(builder.lower(root.get("supplier")), like),
                         builder.like(builder.lower(fitment.get("make")), like),
@@ -257,6 +266,7 @@ public class AccessoryCatalogService {
         item.setBarcode(clean(item.getBarcode()));
         item.setStockQuantity(Math.max(value(item.getStockQuantity()), 0));
         item.setMinimumStock(Math.max(value(item.getMinimumStock()), 0));
+        if (!hasText(item.getVerificationStatus())) item.setVerificationStatus("PRICE_AND_FITMENT_VERIFY");
         if (item.getActive() == null) item.setActive(true);
     }
 
@@ -272,7 +282,11 @@ public class AccessoryCatalogService {
         item.setBrand(text(row, "brand"));
         item.setCategory(text(row, "category"));
         item.setPartType(text(row, "parttype"));
+        item.setOemPartNumber(text(row, "oempartnumber"));
+        item.setAftermarketPartNumber(text(row, "aftermarketpartnumber"));
         item.setHsnCode(text(row, "hsncode"));
+        item.setSourceUrl(text(row, "sourceurl"));
+        item.setVerificationStatus(text(row, "verificationstatus"));
         item.setWholesalePrice(decimal(row, "wholesaleprice"));
         item.setRetailPrice(decimal(row, "retailprice"));
         item.setBargainingPrice(decimal(row, "bargainingprice"));

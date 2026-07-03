@@ -31,6 +31,8 @@ const emptyForm = () => ({
   brand: "",
   category: "",
   partType: "Aftermarket",
+  oemPartNumber: "",
+  aftermarketPartNumber: "",
   hsnCode: "",
   wholesalePrice: "",
   retailPrice: "",
@@ -41,6 +43,8 @@ const emptyForm = () => ({
   supplier: "",
   supplierPhone: "",
   photoUrl: "",
+  sourceUrl: "",
+  verificationStatus: "PRICE_AND_FITMENT_VERIFY",
   notes: "",
   active: true,
   fitments: [emptyFitment()]
@@ -115,6 +119,8 @@ function AccessoryCatalog() {
       brand: item.brand || "",
       category: item.category || "",
       partType: item.partType || "Aftermarket",
+      oemPartNumber: item.oemPartNumber || "",
+      aftermarketPartNumber: item.aftermarketPartNumber || "",
       hsnCode: item.hsnCode || "",
       wholesalePrice: item.wholesalePrice ?? "",
       retailPrice: item.retailPrice ?? "",
@@ -125,6 +131,8 @@ function AccessoryCatalog() {
       supplier: item.supplier || "",
       supplierPhone: item.supplierPhone || "",
       photoUrl: item.photoUrl || "",
+      sourceUrl: item.sourceUrl || "",
+      verificationStatus: item.verificationStatus || "PRICE_AND_FITMENT_VERIFY",
       notes: item.notes || "",
       active: item.active !== false,
       fitments: item.fitments?.length
@@ -344,7 +352,8 @@ function AccessoryCatalog() {
                       <div>
                         <strong>{item.name}</strong>
                         <span>{item.localName || item.category || "Accessory"}</span>
-                        <small>{item.sku} · {item.barcode}</small>
+                        <small>{item.oemPartNumber || item.aftermarketPartNumber || item.sku} · {item.barcode}</small>
+                        <small className="catalog-verification">{verificationLabel(item.verificationStatus)}</small>
                       </div>
                     </div>
                   </td>
@@ -354,9 +363,16 @@ function AccessoryCatalog() {
                   <td data-label="Brand / HSN">
                     <strong>{item.brand || "-"}</strong>
                     <span className="catalog-subtext">HSN {item.hsnCode || "-"}</span>
+                    {item.sourceUrl && (
+                      <a className="catalog-source-link" href={item.sourceUrl} target="_blank" rel="noreferrer">
+                        Check source
+                      </a>
+                    )}
                   </td>
                   <td data-label="Customer Price">
-                    <strong className="catalog-price">Rs. {money(item.retailPrice)}</strong>
+                    <strong className="catalog-price">
+                      {Number(item.retailPrice || 0) > 0 ? `Rs. ${money(item.retailPrice)}` : "Price verify"}
+                    </strong>
                     {Number(item.bargainingPrice || 0) > 0 && (
                       <span className="catalog-subtext">Deal Rs. {money(item.bargainingPrice)}</span>
                     )}
@@ -456,9 +472,13 @@ function CatalogForm({ form, setForm, editingId, saving, onClose, onSubmit }) {
             <Field label="Brand" value={form.brand} onChange={(value) => setValue("brand", value)} />
             <Field label="Category" value={form.category} onChange={(value) => setValue("category", value)} />
             <Field label="Part type" value={form.partType} onChange={(value) => setValue("partType", value)} />
+            <Field label="OEM part number" value={form.oemPartNumber} onChange={(value) => setValue("oemPartNumber", value)} />
+            <Field label="Aftermarket part number" value={form.aftermarketPartNumber} onChange={(value) => setValue("aftermarketPartNumber", value)} />
             <Field label="HSN code" value={form.hsnCode} onChange={(value) => setValue("hsnCode", value)} />
             <Field label="Barcode (blank = auto)" value={form.barcode} onChange={(value) => setValue("barcode", value)} />
             <Field label="Photo URL" value={form.photoUrl} onChange={(value) => setValue("photoUrl", value)} />
+            <Field label="Source URL" value={form.sourceUrl} onChange={(value) => setValue("sourceUrl", value)} />
+            <Field label="Verification status" value={form.verificationStatus} onChange={(value) => setValue("verificationStatus", value)} />
           </div>
         </section>
 
@@ -558,6 +578,12 @@ function FitmentSummary({ fitments }) {
 function number(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function verificationLabel(status) {
+  if (status === "OFFICIAL_SOURCE_VERIFIED") return "Official source verified";
+  if (status === "SUPPLIER_VERIFIED") return "Supplier verified";
+  return "Price / fitment verify";
 }
 
 function integer(value) {

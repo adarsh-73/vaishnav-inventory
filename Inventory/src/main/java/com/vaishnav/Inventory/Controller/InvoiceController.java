@@ -4,8 +4,15 @@ import com.vaishnav.Inventory.entity.Invoice;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
 import com.vaishnav.Inventory.service.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.List;
 
 @RestController
@@ -27,6 +34,23 @@ public class InvoiceController {
     @GetMapping
     public List<Invoice> getInvoices() {
         return invoiceRepository.findAll();
+    }
+
+    @GetMapping("/recent")
+    public List<Invoice> getRecentInvoices(@RequestParam(defaultValue = "8") int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 50));
+        List<Long> ids = invoiceRepository.findRecentIds(PageRequest.of(0, safeLimit));
+        Map<Long, Invoice> invoicesById = invoiceRepository.findByIdIn(ids).stream()
+                .collect(Collectors.toMap(Invoice::getId, Function.identity()));
+        return ids.stream().map(invoicesById::get).filter(java.util.Objects::nonNull).toList();
+    }
+
+    @GetMapping("/current-month")
+    public List<Invoice> getCurrentMonthInvoices() {
+        LocalDate monthStart = LocalDate.now(ZoneId.of("Asia/Kolkata")).withDayOfMonth(1);
+        LocalDateTime start = monthStart.atStartOfDay();
+        LocalDateTime end = monthStart.plusMonths(1).atStartOfDay();
+        return invoiceRepository.findForPeriod(start, end);
     }
 
     @GetMapping("/{id}")

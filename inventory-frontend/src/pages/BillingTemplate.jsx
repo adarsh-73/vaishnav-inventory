@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { todayDate } from '../utils/storage';
 import { API_BASE, getInvoiceBusinessCategory, getInvoiceCategoryTotals, inferInvoiceItemCategory, isServiceText } from '../utils/api';
 import { printInvoiceElement } from '../utils/printInvoice';
+import { createInvoicePdf } from '../utils/invoicePdf';
 
 export default function VaishnavFinalInvoice() {
   const navigate = useNavigate();
@@ -31,7 +32,6 @@ export default function VaishnavFinalInvoice() {
   const [backendProducts, setBackendProducts] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productSearch, setProductSearch] = useState("");
-  const [isPrinting, setIsPrinting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [qrImage, setQrImage] = useState("");
   const [upiId, setUpiId] = useState("7985433770@hdfc");
@@ -49,7 +49,7 @@ export default function VaishnavFinalInvoice() {
 
   const loadInvoiceHistory = async () => {
     try {
-      const response = await fetch(`${API_BASE}/invoices`);
+      const response = await fetch(`${API_BASE}/invoices/recent?limit=8`);
       if (!response.ok) throw new Error("Invoice API failed");
       const data = await response.json();
       setInvoiceHistory(Array.isArray(data) ? uniqueInvoicesByNumber(data) : []);
@@ -151,48 +151,9 @@ export default function VaishnavFinalInvoice() {
     }
   };
 
-  const createInvoicePdf = async () => {
-    const sheet = document.getElementById("vaishnav-print-sheet");
-    if (!sheet) throw new Error("Bill sheet nahi mila.");
-
-    const [{ jsPDF }, html2canvasModule] = await Promise.all([
-      import("jspdf"),
-      import("html2canvas")
-    ]);
-    const html2canvas = html2canvasModule.default;
-    const clone = sheet.cloneNode(true);
-
-    clone.querySelectorAll(".no-print").forEach((node) => node.remove());
-    clone.style.position = "fixed";
-    clone.style.left = "-10000px";
-    clone.style.top = "0";
-    clone.style.margin = "0";
-    clone.style.boxShadow = "none";
-    clone.style.width = "210mm";
-    clone.style.height = "auto";
-    clone.style.minHeight = "297mm";
-    clone.style.overflow = "visible";
-    document.body.appendChild(clone);
-
-    try {
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff"
-      });
-
-      const pdf = new jsPDF("p", "mm", "a4");
-      const imageData = canvas.toDataURL("image/png");
-      pdf.addImage(imageData, "PNG", 0, 0, 210, 297);
-      return pdf;
-    } finally {
-      document.body.removeChild(clone);
-    }
-  };
-
   const handleDownloadPdf = async () => {
     try {
-      const pdf = await createInvoicePdf();
+      const pdf = await createInvoicePdf("vaishnav-print-sheet");
       pdf.save(`${billNo || "vaishnav-bill"}.pdf`);
     } catch (error) {
       alert(`PDF download nahi hua: ${error.message}`);
@@ -200,7 +161,7 @@ export default function VaishnavFinalInvoice() {
   };
 
   const createInvoicePdfFile = async () => {
-    const pdf = await createInvoicePdf();
+    const pdf = await createInvoicePdf("vaishnav-print-sheet");
     const filename = `${billNo || "vaishnav-bill"}.pdf`;
     return new File([pdf.output("blob")], filename, { type: "application/pdf" });
   };
@@ -251,7 +212,7 @@ export default function VaishnavFinalInvoice() {
         return;
       }
 
-      const pdf = await createInvoicePdf();
+      const pdf = await createInvoicePdf("vaishnav-print-sheet");
       pdf.save(pdfFile.name);
       window.open(url, '_blank', 'noopener,noreferrer');
       alert("PDF download ho gaya. WhatsApp Web security ke wajah se desktop browser PDF auto-attach nahi karta; downloaded PDF ko chat me attach kar dein.");
@@ -490,7 +451,7 @@ export default function VaishnavFinalInvoice() {
   };
 
   return (
-    <div style={{ background: isPrinting ? '#ffffff' : '#f1f5f9', minHeight: '100vh', padding: isPrinting ? '0' : '30px 0', fontFamily: 'Arial, sans-serif', overflowY: isPrinting ? 'visible' : 'auto' }}>
+    <div style={{ background: '#f1f5f9', minHeight: '100vh', padding: '30px 0', fontFamily: 'Arial, sans-serif', overflowY: 'auto' }}>
       <style>{`
         @page { size: A4 portrait; margin: 7mm; }
 
@@ -663,7 +624,7 @@ export default function VaishnavFinalInvoice() {
       </div>
 
       {/* INVOICE CANVAS */}
-      <div id="vaishnav-print-sheet" className="invoice-print-sheet" style={isPrinting ? styles.a4SheetFramework : { ...styles.a4SheetFramework, ...styles.screenBillSheet }}>
+      <div id="vaishnav-print-sheet" className="invoice-print-sheet" style={{ ...styles.a4SheetFramework, ...styles.screenBillSheet }}>
         
         {/* BRAND HEADER SECTION */}
         <div style={styles.headerRow}>

@@ -36,6 +36,8 @@ public class AccessoryCatalogItem {
     private String brand;
     private String category;
     private String partType;
+    private String oemPartNumber;
+    private String aftermarketPartNumber;
     private String hsnCode;
     private String supplier;
     private String supplierPhone;
@@ -47,6 +49,12 @@ public class AccessoryCatalogItem {
 
     @Column(length = 1200)
     private String photoUrl;
+
+    @Column(length = 1200)
+    private String sourceUrl;
+
+    private String verificationStatus;
+    private LocalDateTime sourceCheckedAt;
 
     @Column(length = 2000)
     private String notes;

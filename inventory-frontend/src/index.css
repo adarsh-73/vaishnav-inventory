@@ -9,6 +9,15 @@ body {
   overscroll-behavior-y: none;
 }
 
+.route-loading {
+  min-height: 60vh;
+  display: grid;
+  place-items: center;
+  color: #0f2963;
+  font-size: 18px;
+  font-weight: 800;
+}
+
 * {
   box-sizing: border-box;
 }

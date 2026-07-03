@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.time.LocalDate;
+import java.time.ZoneId;
 
 @RestController
 @RequestMapping("/daily-book")
@@ -17,6 +19,13 @@ public class DailyBookController {
     @GetMapping
     public List<DailyBookEntry> getEntries() {
         return dailyBookEntryRepository.findAll();
+    }
+
+    @GetMapping("/current-month")
+    public List<DailyBookEntry> getCurrentMonthEntries() {
+        LocalDate start = LocalDate.now(ZoneId.of("Asia/Kolkata")).withDayOfMonth(1);
+        return dailyBookEntryRepository
+                .findByEntryDateGreaterThanEqualAndEntryDateLessThanOrderByEntryDateDesc(start, start.plusMonths(1));
     }
 
     @PostMapping

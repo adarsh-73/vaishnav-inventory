@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
 import { printInvoiceElement } from "../utils/printInvoice";
+import { createInvoicePdf } from "../utils/invoicePdf";
 
 function OldBills() {
   const navigate = useNavigate();
@@ -175,22 +176,9 @@ function OldBills() {
     }
   };
 
-  const createOldInvoicePdf = async () => {
-    const sheet = document.getElementById("old-bill-print-sheet");
-    if (!sheet) throw new Error("Bill sheet nahi mila.");
-    const [{ jsPDF }, html2canvasModule] = await Promise.all([
-      import("jspdf"),
-      import("html2canvas")
-    ]);
-    const canvas = await html2canvasModule.default(sheet, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
-    const pdf = new jsPDF("p", "mm", "a4");
-    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297);
-    return pdf;
-  };
-
   const handleDownloadPdf = async () => {
     try {
-      const pdf = await createOldInvoicePdf();
+      const pdf = await createInvoicePdf("old-bill-print-sheet");
       pdf.save(`${selectedInvoice?.invoiceNumber || "old-bill"}.pdf`);
     } catch (error) {
       alert(`PDF download nahi hua: ${error.message}`);
@@ -198,7 +186,7 @@ function OldBills() {
   };
 
   const createOldInvoicePdfFile = async () => {
-    const pdf = await createOldInvoicePdf();
+    const pdf = await createInvoicePdf("old-bill-print-sheet");
     const filename = `${selectedInvoice?.invoiceNumber || "old-bill"}.pdf`;
     return new File([pdf.output("blob")], filename, { type: "application/pdf" });
   };
@@ -220,7 +208,7 @@ function OldBills() {
         return;
       }
 
-      const pdf = await createOldInvoicePdf();
+      const pdf = await createInvoicePdf("old-bill-print-sheet");
       pdf.save(pdfFile.name);
       window.open(`https://wa.me/${phone}?text=${encodeURIComponent(whatsappText)}`, "_blank", "noopener,noreferrer");
       alert("PDF download ho gaya. WhatsApp Web security ke wajah se desktop browser PDF auto-attach nahi karta; downloaded PDF ko chat me attach kar dein.");
