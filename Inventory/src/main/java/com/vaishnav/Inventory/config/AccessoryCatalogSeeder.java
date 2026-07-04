@@ -165,12 +165,14 @@ public class AccessoryCatalogSeeder implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         Set<String> existingBarcodes = new HashSet<>(repository.findAllBarcodes());
+        Set<String> allowedStarterBarcodes = new HashSet<>();
         List<AccessoryCatalogItem> newItems = new ArrayList<>();
 
         for (int index = 0; index < STARTER_ITEMS.size(); index++) {
             StarterItem starter = STARTER_ITEMS.get(index);
             for (Vehicle vehicle : VEHICLES) {
                 String reference = starterReference(index + 1, vehicle);
+                allowedStarterBarcodes.add(reference);
                 if (existingBarcodes.contains(reference)) continue;
 
                 AccessoryCatalogItem item = new AccessoryCatalogItem();
@@ -214,6 +216,21 @@ public class AccessoryCatalogSeeder implements ApplicationRunner {
 
         for (int start = 0; start < newItems.size(); start += 100) {
             repository.saveAll(newItems.subList(start, Math.min(start + 100, newItems.size())));
+        }
+
+        List<AccessoryCatalogItem> obsoleteStarterItems = repository
+                .findByBarcodeStartingWithAndActiveTrue("VA-")
+                .stream()
+                .filter(item -> item.getBarcode() != null && item.getBarcode().matches("VA-\\d{3}-.*"))
+                .filter(item -> item.getNotes() != null && item.getNotes().contains("starter record"))
+                .filter(item -> !allowedStarterBarcodes.contains(item.getBarcode()))
+                .peek(item -> item.setActive(false))
+                .toList();
+        for (int start = 0; start < obsoleteStarterItems.size(); start += 100) {
+            repository.saveAll(obsoleteStarterItems.subList(
+                    start,
+                    Math.min(start + 100, obsoleteStarterItems.size())
+            ));
         }
     }
 

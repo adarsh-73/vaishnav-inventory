@@ -23,4 +23,6 @@ public interface AccessoryCatalogRepository extends JpaRepository<AccessoryCatal
 
     @Query("select item.barcode from AccessoryCatalogItem item where item.barcode is not null")
     List<String> findAllBarcodes();
+
+    List<AccessoryCatalogItem> findByBarcodeStartingWithAndActiveTrue(String prefix);
 }
