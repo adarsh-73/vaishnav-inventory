@@ -28,28 +28,94 @@ public class AccessoryCatalogSeeder implements ApplicationRunner {
             new Vehicle("Mahindra", "XUV500"),
             new Vehicle("Mahindra", "XUV700"),
             new Vehicle("Mahindra", "XUV 7XO"),
+            new Vehicle("Mahindra", "Thar"),
+            new Vehicle("Mahindra", "Thar Roxx"),
+            new Vehicle("Mahindra", "XUV400"),
+            new Vehicle("Mahindra", "Marazzo"),
+            new Vehicle("Mahindra", "TUV300"),
             new Vehicle("Tata", "Punch"),
             new Vehicle("Tata", "Nexon"),
             new Vehicle("Tata", "Sierra"),
             new Vehicle("Tata", "Altroz"),
+            new Vehicle("Tata", "Tiago"),
+            new Vehicle("Tata", "Tigor"),
+            new Vehicle("Tata", "Harrier"),
+            new Vehicle("Tata", "Safari"),
+            new Vehicle("Tata", "Curvv"),
+            new Vehicle("Tata", "Sumo"),
             new Vehicle("Maruti Suzuki", "Dzire"),
             new Vehicle("Maruti Suzuki", "Swift"),
-            new Vehicle("Maruti Suzuki", "Alto 800"),
             new Vehicle("Maruti Suzuki", "Fronx"),
             new Vehicle("Maruti Suzuki", "Ertiga"),
             new Vehicle("Maruti Suzuki", "XL6"),
-            new Vehicle("Ford", "EcoSport"),
+            new Vehicle("Maruti Suzuki", "Alto"),
+            new Vehicle("Maruti Suzuki", "Alto 800"),
+            new Vehicle("Maruti Suzuki", "Alto K10"),
+            new Vehicle("Maruti Suzuki", "Wagon R"),
+            new Vehicle("Maruti Suzuki", "Baleno"),
+            new Vehicle("Maruti Suzuki", "Brezza"),
+            new Vehicle("Maruti Suzuki", "Grand Vitara"),
+            new Vehicle("Maruti Suzuki", "Celerio"),
+            new Vehicle("Maruti Suzuki", "S-Presso"),
+            new Vehicle("Maruti Suzuki", "Ignis"),
+            new Vehicle("Maruti Suzuki", "Ciaz"),
+            new Vehicle("Maruti Suzuki", "Eeco"),
+            new Vehicle("Maruti Suzuki", "Omni"),
+            new Vehicle("Hyundai", "Creta"),
+            new Vehicle("Hyundai", "Venue"),
+            new Vehicle("Hyundai", "Exter"),
+            new Vehicle("Hyundai", "Grand i10"),
+            new Vehicle("Hyundai", "Grand i10 Nios"),
+            new Vehicle("Hyundai", "i10"),
+            new Vehicle("Hyundai", "i20"),
+            new Vehicle("Hyundai", "Elite i20"),
+            new Vehicle("Hyundai", "Verna"),
+            new Vehicle("Hyundai", "Aura"),
+            new Vehicle("Hyundai", "Alcazar"),
+            new Vehicle("Hyundai", "Santro"),
+            new Vehicle("Hyundai", "Eon"),
+            new Vehicle("Hyundai", "Xcent"),
+            new Vehicle("Kia", "Seltos"),
+            new Vehicle("Kia", "Sonet"),
+            new Vehicle("Kia", "Carens"),
+            new Vehicle("Renault", "Kwid"),
+            new Vehicle("Renault", "Triber"),
+            new Vehicle("Renault", "Kiger"),
+            new Vehicle("Renault", "Duster"),
+            new Vehicle("Honda", "City"),
+            new Vehicle("Honda", "Amaze"),
+            new Vehicle("Honda", "Elevate"),
+            new Vehicle("Honda", "WR-V"),
+            new Vehicle("Honda", "Jazz"),
+            new Vehicle("Nissan", "Magnite"),
+            new Vehicle("Nissan", "Terrano"),
             new Vehicle("Toyota", "Glanza"),
             new Vehicle("Toyota", "Urban Cruiser Taisor"),
             new Vehicle("Toyota", "Urban Cruiser Hyryder"),
             new Vehicle("Toyota", "Rumion"),
+            new Vehicle("Toyota", "Innova"),
             new Vehicle("Toyota", "Innova Crysta"),
             new Vehicle("Toyota", "Innova Hycross"),
             new Vehicle("Toyota", "Fortuner"),
-            new Vehicle("Toyota", "Hilux"),
-            new Vehicle("Toyota", "Camry"),
-            new Vehicle("Toyota", "Vellfire"),
-            new Vehicle("Toyota", "Land Cruiser 300")
+            new Vehicle("Toyota", "Fortuner Legender"),
+            new Vehicle("Toyota", "Etios"),
+            new Vehicle("Toyota", "Etios Liva"),
+            new Vehicle("MG", "Hector"),
+            new Vehicle("MG", "Astor"),
+            new Vehicle("Ford", "EcoSport"),
+            new Vehicle("Ford", "Figo"),
+            new Vehicle("Ford", "Aspire"),
+            new Vehicle("Ford", "Endeavour"),
+            new Vehicle("Volkswagen", "Polo"),
+            new Vehicle("Volkswagen", "Vento"),
+            new Vehicle("Volkswagen", "Taigun"),
+            new Vehicle("Volkswagen", "Virtus"),
+            new Vehicle("Skoda", "Rapid"),
+            new Vehicle("Skoda", "Kushaq"),
+            new Vehicle("Skoda", "Slavia"),
+            new Vehicle("Chevrolet", "Beat"),
+            new Vehicle("Chevrolet", "Tavera"),
+            new Vehicle("Jeep", "Compass")
     );
 
     private static final List<StarterItem> STARTER_ITEMS = List.of(
@@ -122,7 +188,7 @@ public class AccessoryCatalogSeeder implements ApplicationRunner {
                 item.setStockQuantity(0);
                 item.setMinimumStock(0);
                 item.setVerificationStatus("PRICE_AND_FITMENT_VERIFY");
-                item.setNotes("Vehicle starter record. Exact generation, variant, connector and supplier price verify karke quote karein.");
+                item.setNotes("Sonbhadra common-vehicle starter record. Exact generation, variant, connector and supplier price verify karke quote karein.");
                 item.replaceFitments(List.of(fitment(vehicle)));
                 newItems.add(item);
                 existingBarcodes.add(reference);
@@ -190,7 +256,21 @@ public class AccessoryCatalogSeeder implements ApplicationRunner {
             case "Tata" -> "TAT";
             case "Maruti Suzuki" -> "MSZ";
             case "Ford" -> "FOR";
-            default -> "TOY";
+            case "Hyundai" -> "HYN";
+            case "Kia" -> "KIA";
+            case "Renault" -> "REN";
+            case "Honda" -> "HON";
+            case "Nissan" -> "NIS";
+            case "Toyota" -> "TOY";
+            case "MG" -> "MGC";
+            case "Volkswagen" -> "VWG";
+            case "Skoda" -> "SKD";
+            case "Chevrolet" -> "CHV";
+            case "Jeep" -> "JEP";
+            case "Force" -> "FRC";
+            case "Ashok Leyland" -> "ASL";
+            case "Isuzu" -> "ISU";
+            default -> vehicle.make().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "").substring(0, 3);
         };
         String modelCode = vehicle.model().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
         return "VA-" + String.format("%03d", index) + "-" + makeCode + "-" + modelCode;
