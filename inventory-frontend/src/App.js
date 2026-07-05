@@ -14,6 +14,7 @@ const OldBills = lazy(() => import("./pages/OldBills"));
 const MonthlyStatement = lazy(() => import("./pages/MonthlyStatement"));
 const CryptoTrading = lazy(() => import("./pages/CryptoTrading"));
 const AccessoryCatalog = lazy(() => import("./pages/AccessoryCatalog"));
+const PartsFinder = lazy(() => import("./pages/PartsFinder"));
 
 const APP_PASSWORD = process.env.REACT_APP_APP_PASSWORD || "vaishnav";
 
@@ -34,6 +35,7 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/products" element={<Products />} />
               <Route path="/accessories-catalog" element={<AccessoryCatalog />} />
+              <Route path="/price-enquiry" element={<PartsFinder />} />
               <Route path="/purchase" element={<Purchase />} />
               <Route path="/billing" element={<BillingPage />} />
               <Route path="/old-bills" element={<OldBills />} />

@@ -356,7 +356,10 @@ function AccessoryCatalog() {
           <div className="catalog-empty">
             <FiBox />
             <h2>Catalog abhi khali hai</h2>
-            <p>New Item se add karo ya template download karke Excel/CSV import karo.</p>
+            <p>Ye page sirf saved/imported items dikhata hai. Kisi bhi gaadi aur item ka market price dekhne ke liye Live Price Search kholo.</p>
+            <button className="catalog-button primary" onClick={() => navigate("/price-enquiry")}>
+              <FiSearch /> Live Price Search
+            </button>
           </div>
         ) : (
           <table className="responsive-table catalog-table">

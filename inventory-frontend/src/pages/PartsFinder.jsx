@@ -105,9 +105,9 @@ function PartsFinder() {
     <div style={pageStyle}>
       <section style={heroStyle}>
         <div>
-          <div style={eyebrowStyle}>Parts Finder</div>
-          <h1 style={titleStyle}>Live Boodmo OEM automation</h1>
-          <p style={subText}>Make, model, year, exact side/detail aur OEM choice daalo. App local browser service se Boodmo catalog kholkar closest product cards upar rakhega.</p>
+          <div style={eyebrowStyle}>Free Price Enquiry</div>
+          <h1 style={titleStyle}>OEM & Aftermarket Price Search</h1>
+          <p style={subText}>Har baar koi bhi gaadi aur koi bhi item search karo—seat cover, footrest, fog light, LED, wiper, tail light, chrome ya mat.</p>
         </div>
       </section>
 
@@ -116,7 +116,7 @@ function PartsFinder() {
         <input placeholder="Model: Swift, i20..." value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} style={inputStyle} />
         <input placeholder="Year: 2020" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} style={inputStyle} />
         <input placeholder="Variant / engine: B6 BS6, VXI..." value={form.variant} onChange={(e) => setForm({ ...form, variant: e.target.value })} style={inputStyle} />
-        <input placeholder="Part local wording: fogg light, dicky shock..." value={form.part} onChange={(e) => setForm({ ...form, part: e.target.value })} style={{ ...inputStyle, minWidth: "300px", flex: 1 }} />
+        <input placeholder="Item: footrest, seat cover, fog light, LED, wiper, tail light, chrome, mat..." value={form.part} onChange={(e) => setForm({ ...form, part: e.target.value })} style={{ ...inputStyle, minWidth: "300px", flex: 1 }} />
         <input placeholder="Side/position: front right, LH, rear..." value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} style={inputStyle} />
         <input placeholder="Detail: assy, cover, bulb, kit..." value={form.detail} onChange={(e) => setForm({ ...form, detail: e.target.value })} style={inputStyle} />
         <select value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value })} style={selectStyle}>
@@ -125,7 +125,7 @@ function PartsFinder() {
           <option value="aftermarket">Aftermarket</option>
         </select>
         <button type="button" onClick={searchMarket} disabled={loading || !hasSearch} style={loading || !hasSearch ? disabledBtn : primaryBtn}>
-          {loading ? "Searching..." : "Search Market"}
+          {loading ? "Price dhoondh raha hai..." : "Check Live Price"}
         </button>
       </div>
 
