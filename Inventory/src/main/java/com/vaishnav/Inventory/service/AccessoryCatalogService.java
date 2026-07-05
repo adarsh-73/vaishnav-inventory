@@ -212,23 +212,33 @@ public class AccessoryCatalogService {
             predicates.add(builder.isTrue(root.get("active")));
 
             if (hasText(query)) {
-                String like = "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
-                predicates.add(builder.or(
-                        builder.like(builder.lower(root.get("name")), like),
-                        builder.like(builder.lower(root.get("localName")), like),
-                        builder.like(builder.lower(root.get("sku")), like),
-                        builder.like(builder.lower(root.get("barcode")), like),
-                        builder.like(builder.lower(root.get("brand")), like),
-                        builder.like(builder.lower(root.get("category")), like),
-                        builder.like(builder.lower(root.get("partType")), like),
-                        builder.like(builder.lower(root.get("oemPartNumber")), like),
-                        builder.like(builder.lower(root.get("aftermarketPartNumber")), like),
-                        builder.like(builder.lower(root.get("hsnCode")), like),
-                        builder.like(builder.lower(root.get("supplier")), like),
-                        builder.like(builder.lower(fitment.get("make")), like),
-                        builder.like(builder.lower(fitment.get("model")), like),
-                        builder.like(builder.lower(fitment.get("variant")), like)
-                ));
+                String normalized = query.trim().toLowerCase(Locale.ROOT)
+                        .replace("fogg", "fog")
+                        .replace("creat", "creta")
+                        .replace("vanue", "venue")
+                        .replace("celtos", "seltos")
+                        .replaceAll("[^a-z0-9]+", " ");
+                for (String token : normalized.split("\\s+")) {
+                    if (token.isBlank()) continue;
+                    String like = "%" + token + "%";
+                    predicates.add(builder.or(
+                            builder.like(builder.lower(root.get("name")), like),
+                            builder.like(builder.lower(root.get("localName")), like),
+                            builder.like(builder.lower(root.get("sku")), like),
+                            builder.like(builder.lower(root.get("barcode")), like),
+                            builder.like(builder.lower(root.get("brand")), like),
+                            builder.like(builder.lower(root.get("category")), like),
+                            builder.like(builder.lower(root.get("partType")), like),
+                            builder.like(builder.lower(root.get("oemPartNumber")), like),
+                            builder.like(builder.lower(root.get("aftermarketPartNumber")), like),
+                            builder.like(builder.lower(root.get("hsnCode")), like),
+                            builder.like(builder.lower(root.get("supplier")), like),
+                            builder.like(builder.lower(root.get("notes")), like),
+                            builder.like(builder.lower(fitment.get("make")), like),
+                            builder.like(builder.lower(fitment.get("model")), like),
+                            builder.like(builder.lower(fitment.get("variant")), like)
+                    ));
+                }
             }
             addLike(predicates, builder, fitment.get("make"), make);
             addLike(predicates, builder, fitment.get("model"), model);
