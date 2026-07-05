@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { todayDate } from "../utils/storage";
 import { API_BASE } from "../utils/api";
 
 function Quotation() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [quotations, setQuotations] = useState([]);
   const [items, setItems] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -19,6 +21,18 @@ function Quotation() {
   useEffect(() => {
     loadQuotations();
   }, []);
+
+  useEffect(() => {
+    const desc = searchParams.get("desc");
+    const rate = searchParams.get("rate");
+    if (!desc || !rate) return;
+    setItemForm({
+      desc,
+      qty: searchParams.get("qty") || "1",
+      rate
+    });
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const totalAmount = useMemo(() => items.reduce((sum, item) => sum + item.qty * item.rate, 0), [items]);
 

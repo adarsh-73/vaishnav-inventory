@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   FiArchive,
   FiBox,
@@ -6,6 +7,7 @@ import {
   FiChevronRight,
   FiDownload,
   FiEdit3,
+  FiFileText,
   FiImage,
   FiPlus,
   FiRefreshCw,
@@ -51,6 +53,7 @@ const emptyForm = () => ({
 });
 
 function AccessoryCatalog() {
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [filters, setFilters] = useState({
     q: "",
@@ -228,6 +231,31 @@ function AccessoryCatalog() {
     }
   };
 
+  const quoteItem = (item) => {
+    const rate = Number(item.bargainingPrice || item.retailPrice || 0);
+    if (rate <= 0) {
+      setMessage("Quotation se pehle Edit me customer price aur available part number save karo.");
+      openEdit(item);
+      return;
+    }
+    const fitment = item.fitments?.[0];
+    const vehicle = [fitment?.make, fitment?.model, fitment?.variant]
+      .filter(Boolean)
+      .join(" ");
+    const partNumber = item.oemPartNumber || item.aftermarketPartNumber || "";
+    const description = [
+      item.name,
+      vehicle ? `for ${vehicle}` : "",
+      partNumber ? `Part No. ${partNumber}` : ""
+    ].filter(Boolean).join(" - ");
+    const params = new URLSearchParams({
+      desc: description,
+      qty: "1",
+      rate: String(rate)
+    });
+    navigate(`/quotation?${params.toString()}`);
+  };
+
   const importCatalog = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -390,6 +418,7 @@ function AccessoryCatalog() {
                   </td>
                   <td data-label="Action">
                     <div className="catalog-row-actions">
+                      <button title="Add to quotation" onClick={() => quoteItem(item)}><FiFileText /></button>
                       <button title="Edit details" onClick={() => openEdit(item)}><FiEdit3 /></button>
                       <button title="Add to Products stock" onClick={() => addToStock(item)}><FiPlus /></button>
                       <button className="danger" title="Archive" onClick={() => archiveItem(item)}><FiArchive /></button>
