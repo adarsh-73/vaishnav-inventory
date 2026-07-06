@@ -56,7 +56,7 @@ public class CryptoTradingService {
     private volatile Map<String, Double> learnedWeights = BASE_WEIGHTS;
     private volatile long learnedWeightsAt;
 
-    @Value("${CRYPTO_PRACTICE_SCOUT_ENABLED:true}")
+    @Value("${crypto.practice-scout.enabled:true}")
     private boolean practiceScoutEnabled;
 
     @Autowired
