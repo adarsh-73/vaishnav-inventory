@@ -237,17 +237,19 @@ public class CryptoTradingService {
             trade.setMaxFavorablePrice(toDouble(signal.get("entry")));
             trade.setMaxAdversePrice(toDouble(signal.get("entry")));
             trade.setBestAi(String.valueOf(signal.get("bestAi")));
-            trade.setAiConsensus(String.valueOf(signal.get("aiConsensus")));
-            trade.setTechnicalSummary(String.valueOf(signal.get("technicalSummary")));
+            trade.setAiConsensus(truncate(toJson(signal.get("aiConsensus")), 240));
+            trade.setTechnicalSummary(truncate(String.valueOf(signal.get("technicalSummary")), 240));
             trade.setNewsRisk(String.valueOf(signal.get("newsRisk")));
             trade.setMacroBias(String.valueOf(signal.get("macroBias")));
             trade.setWhaleBias(String.valueOf(signal.get("whaleBias")));
             trade.setOnChainBias(String.valueOf(signal.get("onChainBias")));
             trade.setDataReadiness(String.valueOf(signal.get("dataReadiness")));
-            trade.setIndicatorSnapshot(String.valueOf(signal.get("indicatorSummary")));
-            trade.setEntrySnapshot(toJson(signal.get("completeSnapshot")));
-            trade.setDecisionEvidence(toJson(signal.get("decisionEvidence")));
-            trade.setAiVotesJson(toJson(signal.get("aiVotes")));
+            // Existing production databases may still have legacy VARCHAR(255)
+            // columns even though newer entity definitions use TEXT.
+            trade.setIndicatorSnapshot(truncate(toJson(signal.get("indicatorSummary")), 240));
+            trade.setEntrySnapshot(truncate(toJson(signal.get("completeSnapshot")), 240));
+            trade.setDecisionEvidence(truncate(toJson(signal.get("decisionEvidence")), 240));
+            trade.setAiVotesJson(truncate(toJson(signal.get("aiVotes")), 240));
 
             CryptoPaperTrade saved = paperTradeRepository.save(trade);
             audit.setOpenedTradeId(saved.getId());
