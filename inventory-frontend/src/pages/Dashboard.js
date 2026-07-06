@@ -1,36 +1,59 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiRequest, formatInvoiceCategory, getInvoiceCategoryTotals, getInvoiceProfit, isWashingEntry } from "../utils/api";
 import { calculateReport, getCurrentMonthKey } from "../utils/reporting";
 
+const DASHBOARD_CACHE_KEY = "vaishnav_dashboard_cache_v1";
+
+function readDashboardCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(DASHBOARD_CACHE_KEY) || "{}");
+    return {
+      products: Array.isArray(cached.products) ? cached.products : [],
+      dailyBook: Array.isArray(cached.dailyBook) ? cached.dailyBook : [],
+      invoices: Array.isArray(cached.invoices) ? cached.invoices : []
+    };
+  } catch {
+    return { products: [], dailyBook: [], invoices: [] };
+  }
+}
+
 function Dashboard() {
   const navigate = useNavigate();
-  const [products, setProducts] = useState([]);
-  const [dailyBook, setDailyBook] = useState([]);
-  const [invoices, setInvoices] = useState([]);
+  const [initialData] = useState(readDashboardCache);
+  const [products, setProducts] = useState(initialData.products);
+  const [dailyBook, setDailyBook] = useState(initialData.dailyBook);
+  const [invoices, setInvoices] = useState(initialData.invoices);
   const [activeBreakdown, setActiveBreakdown] = useState("");
 
-  const load = async () => {
-    try {
-      const [productsData, dailyBookData, invoicesData] = await Promise.all([
-        apiRequest("/products"),
-        apiRequest("/daily-book/current-month"),
-        apiRequest("/invoices/current-month")
-      ]);
+  const load = useCallback(async () => {
+    const fallback = readDashboardCache();
+    const results = await Promise.allSettled([
+      apiRequest("/products"),
+      apiRequest("/daily-book/current-month"),
+      apiRequest("/invoices/current-month")
+    ]);
+    const nextData = {
+      products: results[0].status === "fulfilled" && Array.isArray(results[0].value) ? results[0].value : fallback.products,
+      dailyBook: results[1].status === "fulfilled" && Array.isArray(results[1].value) ? results[1].value : fallback.dailyBook,
+      invoices: results[2].status === "fulfilled" && Array.isArray(results[2].value) ? results[2].value : fallback.invoices
+    };
 
-      setProducts(Array.isArray(productsData) ? productsData : []);
-      setDailyBook(Array.isArray(dailyBookData) ? dailyBookData : []);
-      setInvoices(Array.isArray(invoicesData) ? invoicesData : []);
-    } catch {
-      setProducts([]);
-      setDailyBook([]);
-      setInvoices([]);
+    setProducts(nextData.products);
+    setDailyBook(nextData.dailyBook);
+    setInvoices(nextData.invoices);
+    if (results.some((result) => result.status === "fulfilled")) {
+      try {
+        localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(nextData));
+      } catch {
+        // Storage unavailable/full: fresh data is still shown for this session.
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const currentMonthKey = getCurrentMonthKey();
   const report = useMemo(

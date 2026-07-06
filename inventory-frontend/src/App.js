@@ -1,8 +1,8 @@
 import { lazy, Suspense, useState } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import Sidebar from "./Components/Sidebar";
+import Dashboard from "./pages/Dashboard";
 
-const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Products = lazy(() => import("./pages/Product"));
 const Purchase = lazy(() => import("./pages/Purchase"));
 const BillingPage = lazy(() => import("./pages/BillingPage"));
@@ -13,7 +13,6 @@ const Attendance = lazy(() => import("./pages/Attendance"));
 const OldBills = lazy(() => import("./pages/OldBills"));
 const MonthlyStatement = lazy(() => import("./pages/MonthlyStatement"));
 const CryptoTrading = lazy(() => import("./pages/CryptoTrading"));
-const AccessoryCatalog = lazy(() => import("./pages/AccessoryCatalog"));
 const PartsFinder = lazy(() => import("./pages/PartsFinder"));
 
 const APP_PASSWORD = process.env.REACT_APP_APP_PASSWORD || "vaishnav";
@@ -34,7 +33,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/products" element={<Products />} />
-              <Route path="/accessories-catalog" element={<AccessoryCatalog />} />
+              <Route path="/accessories-catalog" element={<Navigate to="/" replace />} />
               <Route path="/price-enquiry" element={<PartsFinder />} />
               <Route path="/purchase" element={<Purchase />} />
               <Route path="/billing" element={<BillingPage />} />
@@ -45,6 +44,7 @@ function App() {
               <Route path="/selling-item" element={<SellingItem />} />
               <Route path="/daily-book" element={<DailyBook />} />
               <Route path="/attendance" element={<Attendance />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
         </div>

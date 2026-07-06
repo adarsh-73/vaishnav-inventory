@@ -5,6 +5,7 @@ import com.vaishnav.Inventory.entity.AccessoryVehicleFitment;
 import com.vaishnav.Inventory.repository.AccessoryCatalogRepository;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -15,6 +16,10 @@ import java.util.Locale;
 import java.util.Set;
 
 @Component
+@ConditionalOnProperty(
+        name = "accessory.catalog.seed.enabled",
+        havingValue = "true"
+)
 public class AccessoryCatalogSeeder implements ApplicationRunner {
 
     private static final List<Vehicle> VEHICLES = List.of(
