@@ -40,7 +40,7 @@ export default function CryptoTrading() {
 
   return <main className="aegis-page"><style>{css}</style>
     <header className="aegis-header">
-      <div><span className="overline">VAISHNAV · AUTONOMOUS INTELLIGENCE</span><h1>Aegis Crypto Desk</h1><p>Real market data, multi-engine confirmation and database-tracked paper execution.</p></div>
+      <div><span className="overline">VAISHNAV · AUTONOMOUS INTELLIGENCE</span><h1>Aegis Crypto Desk</h1><p>Real market data par automatic virtual entry, SL/TP monitoring aur learning journal. Real paisa disabled hai.</p></div>
       <div className="header-actions"><span className="paper-badge"><i/> PAPER ONLY</span><button className={binance.connected?"connected-btn":"primary-btn"} onClick={()=>setShowBinance(true)}>{binance.connected?`✓ Binance ${binance.keyPreview||"Connected"}`:"Connect Binance"}</button><button className="outline-btn" onClick={loadDashboard} disabled={loading}>{loading?"Loading…":"Refresh data"}</button></div>
     </header>
 
@@ -53,6 +53,7 @@ export default function CryptoTrading() {
       <Status label="Fear & greed" value={fearGreed.value?`${number(fearGreed.value)} · ${fearGreed.classification}`:"Unavailable"} tone="neutral"/>
       <Status label="System mode" value="Real data · Paper" tone="good"/>
       <Status label="Automation" value={automation?.enabled?`${automation.lastScanResult||"ACTIVE"}`:"DISABLED"} tone={automation?.enabled&&!automation?.lastError?"good":"bad"}/>
+      <Status label="Practice mode" value={dashboard?.practiceScoutEnabled?"Tiny-risk paper active":"Disabled"} tone={dashboard?.practiceScoutEnabled?"good":"neutral"}/>
     </section>
 
     {error&&<div className="error-banner"><b>Backend unavailable</b><span>{cleanError(error)}</span></div>}

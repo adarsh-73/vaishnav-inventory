@@ -6,6 +6,7 @@ import com.vaishnav.Inventory.entity.CryptoDecisionAudit;
 import com.vaishnav.Inventory.repository.CryptoPaperTradeRepository;
 import com.vaishnav.Inventory.repository.CryptoDecisionAuditRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -22,6 +23,7 @@ public class CryptoTradingService {
     private static final double MAX_RISK_PER_TRADE_PERCENT = 1.0;
     private static final double EXPLORATORY_RISK_PER_TRADE_PERCENT = 0.25;
     private static final double LEARNING_SCOUT_RISK_PER_TRADE_PERCENT = 0.10;
+    private static final double PRACTICE_SCOUT_RISK_PER_TRADE_PERCENT = 0.05;
     private static final double MAX_DAILY_LOSS_PERCENT = 3.0;
     private static final double MAX_WEEKLY_LOSS_PERCENT = 8.0;
     private static final double MAX_NOTIONAL_LEVERAGE = 3.0;
@@ -37,6 +39,8 @@ public class CryptoTradingService {
     private static final int AI_PREFILTER_MIN_SCORE = 50;
     private static final int EXPLORATORY_MIN_AI_CONFIDENCE = 52;
     private static final int LEARNING_SCOUT_MIN_AI_CONFIDENCE = 45;
+    private static final int PRACTICE_SCOUT_MIN_SCORE = 44;
+    private static final int PRACTICE_SCOUT_MIN_DERIVATIVES = 35;
     private static final int MIN_LEARNING_SAMPLES = 20;
     private static final long LEARNING_CACHE_MS = 10 * 60 * 1000L;
     private static final Map<String, Double> BASE_WEIGHTS = Map.of(
@@ -51,6 +55,9 @@ public class CryptoTradingService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile Map<String, Double> learnedWeights = BASE_WEIGHTS;
     private volatile long learnedWeightsAt;
+
+    @Value("${CRYPTO_PRACTICE_SCOUT_ENABLED:true}")
+    private boolean practiceScoutEnabled;
 
     @Autowired
     private CryptoPaperTradeRepository paperTradeRepository;
@@ -97,9 +104,10 @@ public class CryptoTradingService {
                 .filter(trade -> ENGINE_VERSION.equals(trade.getEngineVersion()))
                 .toList();
 
-        response.put("mode", "REAL_CANDLE_PAPER_ONLY");
+        response.put("mode", "REAL_CANDLE_AUTONOMOUS_PAPER");
         response.put("realMoneyEnabled", false);
         response.put("cashMode", "DISABLED");
+        response.put("practiceScoutEnabled", practiceScoutEnabled);
         response.put("maxDailyTrades", MAX_DAILY_PAPER_TRADES);
         response.put("fearGreed", marketDataService.getFearGreed());
         response.put("macroNews", macroNewsService.getContext());
@@ -110,6 +118,8 @@ public class CryptoTradingService {
                 "maxDailyLossPercent", MAX_DAILY_LOSS_PERCENT,
                 "maxWeeklyLossPercent", MAX_WEEKLY_LOSS_PERCENT,
                 "maxNotionalLeverage", MAX_NOTIONAL_LEVERAGE,
+                "practiceScoutRiskPercent", PRACTICE_SCOUT_RISK_PER_TRADE_PERCENT,
+                "practiceScoutMinimumScore", PRACTICE_SCOUT_MIN_SCORE,
                 "authority", "DETERMINISTIC_RISK_ENGINE"
         ));
         response.put("dataPolicy", "No simulated market values. Missing providers return NOT_CONFIGURED or UNAVAILABLE.");
@@ -452,17 +462,36 @@ public class CryptoTradingService {
             int longBlend = blendedDirectionScore(technicalLongScore, derivativesLongScore, macroLongScore, whaleLongScore, onChainLongScore, historicalLongScore, aiLongAverage);
             int shortBlend = blendedDirectionScore(technicalShortScore, derivativesShortScore, macroShortScore, whaleShortScore, onChainShortScore, historicalShortScore, aiShortAverage);
             int finalScore = "LONG".equals(finalSignal) ? longBlend : shortBlend;
+            int preAiCandidateScore = "LONG".equals(finalSignal) ? preAiLongScore : preAiShortScore;
             boolean marketEnginesReady = futuresAvailable && macroReady && newsReady && whaleReady && onChainReady && historicalReady;
             boolean standardAllowed = marketEnginesReady && aiStrictQuorumReady && aligned && finalScore >= STANDARD_MIN_SCORE && derivativesAligned && aiAligned && aiConfidence >= 60 && !fundingRisk && !macroBlocked;
             boolean exploratoryAllowed = marketEnginesReady && aiStrictQuorumReady && aligned && finalScore >= EXPLORATORY_MIN_SCORE && exploratoryDerivativesAligned
                     && aiAligned && aiConfidence >= EXPLORATORY_MIN_AI_CONFIDENCE && !fundingRisk && !macroBlocked;
             boolean learningScoutAllowed = marketEnginesReady && aiQuorumReady && aligned && finalScore >= LEARNING_SCOUT_MIN_SCORE && learningScoutDerivativesAligned
                     && aiAligned && aiConfidence >= LEARNING_SCOUT_MIN_AI_CONFIDENCE && !fundingRisk;
-            boolean allowed = standardAllowed || exploratoryAllowed || learningScoutAllowed;
-            String opportunityTier = standardAllowed ? "STANDARD" : exploratoryAllowed ? "EXPLORATORY_LEARNING" : learningScoutAllowed ? "LEARNING_SCOUT" : "BLOCKED";
+            boolean practiceMacroCompatible = !("RISK_OFF".equals(macroBias) && "LONG".equals(finalSignal))
+                    && !("RISK_ON".equals(macroBias) && "SHORT".equals(finalSignal));
+            boolean practiceScoutAllowed = practiceScoutEnabled
+                    && marketEnginesReady
+                    && aligned
+                    && derivativesScore >= PRACTICE_SCOUT_MIN_DERIVATIVES
+                    && preAiCandidateScore >= PRACTICE_SCOUT_MIN_SCORE
+                    && !fundingRisk
+                    && practiceMacroCompatible;
+            boolean allowed = standardAllowed || exploratoryAllowed || learningScoutAllowed || practiceScoutAllowed;
+            String opportunityTier = standardAllowed ? "STANDARD"
+                    : exploratoryAllowed ? "EXPLORATORY_LEARNING"
+                    : learningScoutAllowed ? "LEARNING_SCOUT"
+                    : practiceScoutAllowed ? "PRACTICE_SCOUT"
+                    : "BLOCKED";
+            int decisionScore = practiceScoutAllowed && !standardAllowed && !exploratoryAllowed && !learningScoutAllowed
+                    ? preAiCandidateScore
+                    : finalScore;
             double effectiveRiskPercent = standardAllowed ? MAX_RISK_PER_TRADE_PERCENT
                     : exploratoryAllowed ? EXPLORATORY_RISK_PER_TRADE_PERCENT
-                    : learningScoutAllowed ? LEARNING_SCOUT_RISK_PER_TRADE_PERCENT : 0.0;
+                    : learningScoutAllowed ? LEARNING_SCOUT_RISK_PER_TRADE_PERCENT
+                    : practiceScoutAllowed ? PRACTICE_SCOUT_RISK_PER_TRADE_PERCENT
+                    : 0.0;
 
             double riskAmount = PAPER_ACCOUNT_EQUITY * effectiveRiskPercent / 100.0;
             double riskBasedQuantity = stopDistance <= 0 ? 0 : riskAmount / stopDistance;
@@ -476,8 +505,10 @@ public class CryptoTradingService {
             map.put("rawSignal", finalSignal);
             map.put("allowed", allowed);
             map.put("opportunityTier", opportunityTier);
-            map.put("confidence", finalScore);
-            map.put("finalScore", finalScore);
+            map.put("confidence", decisionScore);
+            map.put("finalScore", decisionScore);
+            map.put("aiAdjustedScore", finalScore);
+            map.put("practiceScout", practiceScoutAllowed);
             map.put("aiReviewEligible", aiReviewEligible);
             map.put("preAiLongScore", preAiLongScore);
             map.put("preAiShortScore", preAiShortScore);
@@ -506,7 +537,11 @@ public class CryptoTradingService {
             map.put("whaleBias", whaleBias);
             map.put("onChainBias", onChainBias);
             map.put("historicalBias", historicalBias);
-            map.put("dataReadiness", marketEnginesReady ? (aiQuorumReady ? "READY" : "READY_WAITING_AI") : "BLOCKED_MISSING_MANDATORY_DATA");
+            map.put("dataReadiness", marketEnginesReady
+                    ? practiceScoutAllowed ? "READY_PRACTICE_PAPER"
+                    : aiQuorumReady ? "READY"
+                    : "READY_WAITING_AI"
+                    : "BLOCKED_MISSING_MANDATORY_DATA");
             Map<String, Object> futuresData = new LinkedHashMap<>();
             futuresData.put("openInterest", futures.openInterest);
             futuresData.put("openInterestValue", futures.openInterestValue);
@@ -562,7 +597,11 @@ public class CryptoTradingService {
 
             map.put("aiVotes", aiConsensus.get("votes"));
             map.put("aiConsensus", aiConsensus);
-            map.put("bestAi", aiQuorumReady ? "Adaptive multi-provider AI consensus" : "No AI quorum (any 2 live providers required)");
+            map.put("bestAi", practiceScoutAllowed
+                    ? "Deterministic practice scout; AI advisory unavailable/disagreed"
+                    : aiQuorumReady
+                    ? "Adaptive multi-provider AI consensus"
+                    : "No AI quorum (any 1 live provider required)");
             map.put("indicatorSummary", Map.of(
                     "total", Math.round(toDouble(a15.get("indicatorCount")) + toDouble(a1h.get("indicatorCount")) + toDouble(a4h.get("indicatorCount"))),
                     "perTimeframe", a15.get("indicatorCount"),
@@ -600,11 +639,23 @@ public class CryptoTradingService {
             evidence.put("macroGuardSafe", !macroBlocked);
             evidence.put("mandatoryProvidersReady", marketEnginesReady);
             evidence.put("candidateSignal", finalSignal);
-            evidence.put("finalScore", finalScore);
+            evidence.put("finalScore", decisionScore);
+            evidence.put("aiAdjustedScore", finalScore);
+            evidence.put("preAiCandidateScore", preAiCandidateScore);
+            evidence.put("practiceScoutAllowed", practiceScoutAllowed);
             evidence.put("directionProbabilities", map.get("directionProbabilities"));
             map.put("decisionEvidence", evidence);
             map.put("completeSnapshot", aiSnapshot);
-            List<String> blockers = buildBlockReasons(readiness, aligned, finalScore, learningScoutDerivativesAligned, aiQuorumReady, aiAligned, aiConfidence, fundingRisk, macroBlocked);
+            List<String> blockers = buildBlockReasons(readiness, aligned, decisionScore, learningScoutDerivativesAligned, aiQuorumReady, aiAligned, aiConfidence, fundingRisk, macroBlocked);
+            if (!allowed && practiceScoutEnabled) {
+                if (!practiceMacroCompatible) blockers.add("Practice scout direction conflicts with macro regime");
+                if (derivativesScore < PRACTICE_SCOUT_MIN_DERIVATIVES) {
+                    blockers.add("Practice derivatives score below " + PRACTICE_SCOUT_MIN_DERIVATIVES + "%");
+                }
+                if (preAiCandidateScore < PRACTICE_SCOUT_MIN_SCORE) {
+                    blockers.add("Practice pre-AI score below " + PRACTICE_SCOUT_MIN_SCORE + "%");
+                }
+            }
             map.put("blockers", blockers);
             map.put("blockReason", allowed ? "" : String.join(" | ", blockers));
 
