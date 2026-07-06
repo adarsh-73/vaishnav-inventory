@@ -3,6 +3,7 @@ package com.vaishnav.Inventory.Controller;
 import com.vaishnav.Inventory.entity.Invoice;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
 import com.vaishnav.Inventory.service.InvoiceService;
+import com.vaishnav.Inventory.service.InvoiceStorageService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +26,9 @@ public class InvoiceController {
 
     @Autowired
     private InvoiceRepository invoiceRepository;
+
+    @Autowired
+    private InvoiceStorageService invoiceStorageService;
 
     @PostMapping
     public Invoice createInvoice(@RequestBody Invoice invoice) {
@@ -78,5 +82,21 @@ public class InvoiceController {
     @DeleteMapping("/{id}")
     public void deleteInvoice(@PathVariable Long id) {
         invoiceService.deleteInvoice(id);
+    }
+
+    @GetMapping("/storage-stats")
+    public Map<String, Object> getStorageStats() {
+        return invoiceStorageService.storageStats();
+    }
+
+    @GetMapping("/cleanup-preview")
+    public Map<String, Object> getCleanupPreview(@RequestParam(defaultValue = "2") int years) {
+        return invoiceStorageService.cleanupPreview(years);
+    }
+
+    @DeleteMapping("/cleanup-old")
+    public Map<String, Object> cleanupOldBills(@RequestParam(defaultValue = "2") int years,
+                                               @RequestParam String confirmation) {
+        return invoiceStorageService.cleanup(years, confirmation);
     }
 }

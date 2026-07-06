@@ -16,6 +16,10 @@ function OldBills() {
   const [showReturnPanel, setShowReturnPanel] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState({});
+  const [storageStats, setStorageStats] = useState(null);
+  const [retentionYears, setRetentionYears] = useState(2);
+  const [cleanupPreview, setCleanupPreview] = useState(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
 
   const loadInvoices = useCallback(async () => {
     setLoading(true);
@@ -32,6 +36,10 @@ function OldBills() {
       setInvoices(unique);
       setDailyBookEntries(Array.isArray(dailyBookData) ? dailyBookData : []);
       setSelectedInvoice((current) => current || unique[0] || null);
+      fetch(`${API_BASE}/invoices/storage-stats`)
+        .then((response) => response.ok ? response.json() : null)
+        .then((stats) => stats && setStorageStats(stats))
+        .catch(() => {});
     } catch (error) {
       alert(`Old bills / udhar load error: ${error.message}`);
     } finally {
@@ -342,6 +350,51 @@ function OldBills() {
     }
   };
 
+  const previewOldBillCleanup = async () => {
+    setCleanupBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/invoices/cleanup-preview?years=${retentionYears}`);
+      if (!response.ok) throw new Error(await response.text() || "Cleanup preview failed");
+      setCleanupPreview(await response.json());
+    } catch (error) {
+      alert(`Storage preview nahi mila: ${error.message}`);
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const cleanupOldPaidBills = async () => {
+    if (!cleanupPreview) return alert("Pehle Check Old Bills dabao.");
+    if (Number(cleanupPreview.eligiblePaidBills || 0) === 0) return alert("Delete karne layak old paid bill nahi hai.");
+
+    const confirmation = window.prompt(
+      `${cleanupPreview.cutoffDate} se purane ${cleanupPreview.eligiblePaidBills} paid bills permanently delete honge.\n` +
+      `${cleanupPreview.protectedUnpaidBills} udhar bills safe rahenge.\n\nConfirm karne ke liye DELETE OLD BILLS type karo.`
+    );
+    if (confirmation !== "DELETE OLD BILLS") return;
+
+    setCleanupBusy(true);
+    try {
+      const params = new URLSearchParams({
+        years: String(retentionYears),
+        confirmation
+      });
+      const response = await fetch(`${API_BASE}/invoices/cleanup-old?${params}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await response.text() || "Cleanup failed");
+      const result = await response.json();
+      setCleanupPreview(null);
+      await loadInvoices();
+      alert(
+        `${result.deletedBills} bills aur ${result.deletedBillItems} items delete hue. ` +
+        `${result.protectedUnpaidBills} udhar bills safe hain. Stock change nahi hua.`
+      );
+    } catch (error) {
+      alert(`Old bill cleanup nahi hua: ${error.message}`);
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
   return (
     <div style={pageStyle}>
       <style>{`
@@ -402,6 +455,63 @@ function OldBills() {
             {searchParams.get("udhar") === "1" ? ` + ${filteredDailyBookUdhar.length} daily-book udhar` : ""}
           </span>
         </div>
+
+        {searchParams.get("udhar") !== "1" && (
+          <section style={storagePanel}>
+            <div style={sectionHeaderRow}>
+              <div>
+                <h2 style={storageTitle}>Bill Storage & Old Data Cleanup</h2>
+                <div style={subText}>Udhar bills cleanup me kabhi delete nahi honge. Cleanup se current stock bhi change nahi hoga.</div>
+              </div>
+              <div style={storageActions}>
+                <select
+                  value={retentionYears}
+                  onChange={(event) => {
+                    setRetentionYears(Number(event.target.value));
+                    setCleanupPreview(null);
+                  }}
+                  style={inputStyle}
+                >
+                  <option value={2}>2 saal purane</option>
+                  <option value={3}>3 saal purane</option>
+                  <option value={5}>5 saal purane</option>
+                </select>
+                <button type="button" onClick={previewOldBillCleanup} disabled={cleanupBusy} style={secondaryBtn}>
+                  {cleanupBusy ? "Checking..." : "Check Old Bills"}
+                </button>
+              </div>
+            </div>
+
+            <div style={storageGrid}>
+              <StorageMetric label="Saved Bills" value={storageStats?.invoiceCount ?? invoices.length} />
+              <StorageMetric label="Bill Items" value={storageStats?.invoiceItemCount ?? invoices.reduce((sum, invoice) => sum + (invoice.invoiceItems?.length || 0), 0)} />
+              <StorageMetric label="Whole Database Used" value={storageStats ? formatBytes(storageStats.databaseUsedBytes) : "Checking..."} />
+              <StorageMetric label="Bills Table Used" value={storageStats ? formatBytes(storageStats.billTablesUsedBytes) : "Checking..."} />
+              <StorageMetric
+                label="Estimated Bills More"
+                value={storageStats?.estimatedAdditionalBills == null ? "Quota unknown" : Number(storageStats.estimatedAdditionalBills).toLocaleString("en-IN")}
+              />
+            </div>
+
+            {storageStats && (
+              <div style={storageNote}>
+                Oldest bill: {formatDate(storageStats.oldestInvoiceDate)} · Latest bill: {formatDate(storageStats.newestInvoiceDate)}.
+                {" "}{storageStats.note}
+              </div>
+            )}
+
+            {cleanupPreview && (
+              <div style={cleanupResult}>
+                <strong>{cleanupPreview.cutoffDate}</strong> se purane{" "}
+                <strong>{cleanupPreview.eligiblePaidBills} paid bills</strong> delete ho sakte hain.{" "}
+                <strong>{cleanupPreview.protectedUnpaidBills} udhar bills protected</strong> hain.
+                <button type="button" onClick={cleanupOldPaidBills} disabled={cleanupBusy} style={dangerBtn}>
+                  Permanently Delete Old Paid Bills
+                </button>
+              </div>
+            )}
+          </section>
+        )}
 
         {searchParams.get("udhar") === "1" && (
           <div style={allUdharPanel}>
@@ -690,6 +800,23 @@ function formatDate(value) {
   return value ? String(value).slice(0, 10) : "-";
 }
 
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function StorageMetric({ label, value }) {
+  return (
+    <div style={storageMetric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function productIdentity(product) {
   return [
     product.make,
@@ -714,6 +841,13 @@ const subText = { color: "#64748b", marginTop: "4px" };
 const searchRow = { display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", marginTop: "18px" };
 const inputStyle = { padding: "11px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "14px" };
 const countText = { color: "#475569", fontWeight: "bold" };
+const storagePanel = { marginTop: "18px", padding: "16px", border: "1px solid #bfdbfe", borderRadius: "9px", background: "#eff6ff" };
+const storageTitle = { margin: 0, color: "#0f2963", fontSize: "18px" };
+const storageActions = { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" };
+const storageGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: "9px", marginTop: "14px" };
+const storageMetric = { display: "flex", flexDirection: "column", gap: "5px", padding: "11px", borderRadius: "7px", background: "#ffffff", color: "#475569", border: "1px solid #dbeafe" };
+const storageNote = { marginTop: "10px", color: "#475569", fontSize: "13px" };
+const cleanupResult = { marginTop: "12px", padding: "12px", border: "1px solid #fca5a5", borderRadius: "7px", background: "#fff7ed", color: "#7f1d1d", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" };
 const resultGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "10px", marginTop: "16px" };
 const billCardStyle = { textAlign: "left", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#f8fafc", cursor: "pointer", display: "flex", flexDirection: "column", gap: "4px", color: "#0f172a" };
 const selectedCardStyle = { ...billCardStyle, border: "2px solid #0f2963", background: "#eef2ff" };

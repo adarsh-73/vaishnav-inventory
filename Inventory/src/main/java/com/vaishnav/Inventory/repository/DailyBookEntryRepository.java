@@ -13,4 +13,5 @@ public interface DailyBookEntryRepository extends JpaRepository<DailyBookEntry, 
             LocalDate start,
             LocalDate end
     );
+    int deleteByNoteContainingIgnoreCase(String note);
 }

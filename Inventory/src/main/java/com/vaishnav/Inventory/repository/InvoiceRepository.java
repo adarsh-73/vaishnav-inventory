@@ -33,4 +33,29 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
             LocalDateTime start,
             LocalDateTime end
     );
+
+    @Query("""
+            select distinct i from Invoice i
+            left join fetch i.invoiceItems
+            where i.invoiceDate < :cutoff
+              and (i.remainingAmount is null or i.remainingAmount <= 0)
+            order by i.invoiceDate
+            """)
+    List<Invoice> findPaidInvoicesOlderThan(LocalDateTime cutoff);
+
+    @Query("select count(i) from Invoice i where i.invoiceDate < :cutoff")
+    long countOlderThan(LocalDateTime cutoff);
+
+    @Query("""
+            select count(i) from Invoice i
+            where i.invoiceDate < :cutoff
+              and i.remainingAmount > 0
+            """)
+    long countUnpaidOlderThan(LocalDateTime cutoff);
+
+    @Query("select min(i.invoiceDate) from Invoice i")
+    LocalDateTime findOldestInvoiceDate();
+
+    @Query("select max(i.invoiceDate) from Invoice i")
+    LocalDateTime findNewestInvoiceDate();
 }
