@@ -191,7 +191,7 @@ public class CryptoTradingService {
         return summary;
     }
 
-    public List<CryptoPaperTrade> runPaperScan() {
+    public synchronized List<CryptoPaperTrade> runPaperScan() {
         List<CryptoPaperTrade> created = new ArrayList<>();
 
         removeLegacyRunningTrades();
@@ -263,6 +263,7 @@ public class CryptoTradingService {
 
     public List<CryptoPaperTrade> closeRunningTrades() {
         removeLegacyRunningTrades();
+        closeDuplicateRunningTrades();
         List<CryptoPaperTrade> runningTrades = paperTradeRepository.findByStatus("RUNNING");
 
         for (CryptoPaperTrade trade : runningTrades) {
@@ -308,6 +309,23 @@ public class CryptoTradingService {
         }
 
         return runningTrades;
+    }
+
+    private void closeDuplicateRunningTrades() {
+        List<CryptoPaperTrade> running = paperTradeRepository.findByStatus("RUNNING").stream()
+                .filter(trade -> ENGINE_VERSION.equals(trade.getEngineVersion()))
+                .sorted(Comparator.comparing(CryptoPaperTrade::getId))
+                .toList();
+        if (running.size() <= 1) return;
+
+        for (int index = 1; index < running.size(); index++) {
+            CryptoPaperTrade duplicate = running.get(index);
+            double currentPrice = marketDataService.getLivePrice(duplicate.getSymbol());
+            double direction = "LONG".equals(duplicate.getSide()) ? 1 : -1;
+            double pnl = (currentPrice - duplicate.getEntryPrice()) * duplicate.getQuantity() * direction;
+            closeTrade(duplicate, currentPrice, pnl, "Duplicate concurrency guard");
+            paperTradeRepository.save(duplicate);
+        }
     }
 
     private void removeLegacyRunningTrades() {
