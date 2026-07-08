@@ -22,6 +22,10 @@ body {
   box-sizing: border-box;
 }
 
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
 }
@@ -53,6 +57,59 @@ textarea {
 button,
 a {
   touch-action: manipulation;
+}
+
+button,
+.sidebar-link,
+[role="button"] {
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    filter 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+  will-change: transform;
+}
+
+button:not(:disabled):hover,
+.sidebar-link:hover,
+[role="button"]:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 41, 99, 0.13);
+  filter: saturate(1.04);
+}
+
+button:not(:disabled):active,
+.sidebar-link:active,
+[role="button"]:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: 0 4px 10px rgba(15, 41, 99, 0.12);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(196, 154, 69, 0.35);
+  outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  transition:
+    border-color 130ms ease,
+    box-shadow 130ms ease,
+    background-color 130ms ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #0f2963 !important;
+  box-shadow: 0 0 0 3px rgba(15, 41, 99, 0.10);
 }
 
 table {
@@ -132,6 +189,11 @@ table {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.sidebar-link:hover {
+  border-color: rgba(249, 217, 137, 0.46) !important;
+  background: rgba(30, 41, 59, 0.96) !important;
 }
 
 .sidebar-link.is-active {

@@ -124,7 +124,7 @@ export default function VaishnavFinalInvoice() {
   const billSplit = useMemo(() => getInvoiceCategoryTotals({ items, discountAmount: discountValue }), [items, discountValue]);
   const paidValue = Math.min(totalAmount, Math.max(0, paidAmount === "" ? totalAmount : Number(paidAmount || 0)));
   const remainingAmount = Math.max(totalAmount - paidValue, 0);
-  const qrPayableAmount = remainingAmount;
+  const qrPayableAmount = paidAmount === "" ? totalAmount : remainingAmount;
 
   const qrData = useMemo(() => {
     const params = new URLSearchParams({
@@ -141,7 +141,8 @@ export default function VaishnavFinalInvoice() {
     return `upi://pay?${params.toString()}`;
   }, [billNo, qrPayableAmount, upiId]);
 
-  const qrSrc = qrImage || `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(qrData)}`;
+  const dynamicQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(qrData)}`;
+  const qrSrc = qrPayableAmount > 0 ? dynamicQrSrc : (qrImage || dynamicQrSrc);
 
   const handlePrint = () => {
     try {
@@ -606,6 +607,9 @@ export default function VaishnavFinalInvoice() {
         <div style={styles.qrControlsRow}>
           <input type="text" placeholder="UPI ID" value={upiId} onChange={e => setUpiId(e.target.value)} style={{ ...styles.panelInput, flex: 1 }} />
           <input type="file" accept="image/*" onChange={handleQrUpload} style={{ ...styles.panelInput, flex: 1 }} />
+          <div style={styles.qrAmountHint}>
+            QR Amount: ₹ {qrPayableAmount} {paidAmount === "" ? "(full bill auto)" : "(balance auto)"} · Auto amount ke liye UPI ID wala dynamic QR use hoga
+          </div>
         </div>
         {invoiceHistory.length > 0 && (
           <div style={styles.historyStrip}>
@@ -782,7 +786,7 @@ export default function VaishnavFinalInvoice() {
           
           <div style={styles.qrBlockUnitContainerColumn}>
             <div style={styles.qrTopLabelPillText}>
-              {qrPayableAmount > 0 ? `PAY BALANCE ₹ ${qrPayableAmount}` : "PAYMENT COMPLETE"}
+              {qrPayableAmount > 0 ? `PAY ₹ ${qrPayableAmount}` : "PAYMENT COMPLETE"}
             </div>
             <div style={styles.qrGraphicWhiteOuterFrameBox}>
               
@@ -914,6 +918,7 @@ const styles = {
   topControlPanel: { maxWidth: '210mm', margin: '0 auto 20px auto', padding: '16px', background: '#FFF', borderRadius: '6px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', border: '1px solid #CBD5E1' },
   actionButtonsRow: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' },
   qrControlsRow: { display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' },
+  qrAmountHint: { display: 'flex', alignItems: 'center', background: '#ECFDF5', border: '1px solid #A7F3D0', color: '#047857', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', fontWeight: '900' },
   productSearchBox: { flex: 2.6, minWidth: '320px', position: 'relative' },
   productResultList: { position: 'absolute', zIndex: 20, top: '44px', left: 0, right: 0, maxHeight: '260px', overflowY: 'auto', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '6px', boxShadow: '0 10px 24px rgba(15,23,42,0.18)', padding: '6px' },
   productResultBtn: { width: '100%', border: '1px solid #E2E8F0', background: '#FFFFFF', color: '#0F172A', borderRadius: '5px', padding: '8px', marginBottom: '6px', textAlign: 'left', display: 'grid', gap: '2px', cursor: 'pointer', fontSize: '12px' },

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import Sidebar from "./Components/Sidebar";
 import Dashboard from "./pages/Dashboard";
@@ -18,6 +18,25 @@ const APP_PASSWORD = process.env.REACT_APP_APP_PASSWORD || "vaishnav";
 
 function App() {
   const [isUnlocked, setIsUnlocked] = useState(() => localStorage.getItem("vaishnav_app_unlocked") === "1");
+
+  useEffect(() => {
+    if (!isUnlocked) return undefined;
+
+    const preloadCorePages = () => {
+      import("./pages/BillingPage");
+      import("./pages/Product");
+      import("./pages/OldBills");
+      import("./pages/DailyBook");
+    };
+
+    if ("requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(preloadCorePages, { timeout: 2500 });
+      return () => window.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(preloadCorePages, 1200);
+    return () => window.clearTimeout(timeoutId);
+  }, [isUnlocked]);
 
   if (!isUnlocked) {
     return <LoginGate onUnlock={() => setIsUnlocked(true)} />;

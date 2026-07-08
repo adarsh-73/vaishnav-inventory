@@ -2,15 +2,15 @@ import { NavLink } from "react-router-dom";
 
 const navItems = [
   { to: "/", icon: "D", label: "Dashboard" },
-  { to: "/billing", icon: "B", label: "Billing" },
-  { to: "/products", icon: "P", label: "Products" },
-  { to: "/old-bills", icon: "O", label: "Old Bills" },
-  { to: "/daily-book", icon: "K", label: "Daily Book" },
-  { to: "/purchase", icon: "S", label: "Purchase" },
-  { to: "/monthly-statement", icon: "M", label: "Statement" },
-  { to: "/quotation", icon: "Q", label: "Quotation" },
-  { to: "/attendance", icon: "A", label: "Attendance" },
-  { to: "/crypto-trading", icon: "C", label: "Crypto" }
+  { to: "/billing", icon: "B", label: "Billing", preload: () => import("../pages/BillingPage") },
+  { to: "/products", icon: "P", label: "Products", preload: () => import("../pages/Product") },
+  { to: "/old-bills", icon: "O", label: "Old Bills", preload: () => import("../pages/OldBills") },
+  { to: "/daily-book", icon: "K", label: "Daily Book", preload: () => import("../pages/DailyBook") },
+  { to: "/purchase", icon: "S", label: "Purchase", preload: () => import("../pages/Purchase") },
+  { to: "/monthly-statement", icon: "M", label: "Statement", preload: () => import("../pages/MonthlyStatement") },
+  { to: "/quotation", icon: "Q", label: "Quotation", preload: () => import("../pages/Quotation") },
+  { to: "/attendance", icon: "A", label: "Attendance", preload: () => import("../pages/Attendance") },
+  { to: "/crypto-trading", icon: "C", label: "Crypto", preload: () => import("../pages/CryptoTrading") }
 ];
 
 function Sidebar() {
@@ -37,6 +37,9 @@ function Sidebar() {
             end={item.to === "/"}
             className={({ isActive }) => `sidebar-link${isActive ? " is-active" : ""}`}
             style={menuStyle}
+            onPointerEnter={item.preload}
+            onFocus={item.preload}
+            onTouchStart={item.preload}
           >
             <span className="nav-icon" aria-hidden="true">{item.icon}</span>
             <span className="nav-label">{item.label}</span>
