@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.DatabaseMetaData;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -39,17 +40,8 @@ public class InvoiceStorageService {
     public Map<String, Object> storageStats() {
         long invoiceCount = invoiceRepository.count();
         long invoiceItemCount = queryLong("select count(*) from invoice_item");
-        long databaseBytes = queryLong("""
-                select coalesce(sum(data_length + index_length), 0)
-                from information_schema.tables
-                where table_schema = database()
-                """);
-        long billTableBytes = queryLong("""
-                select coalesce(sum(data_length + index_length), 0)
-                from information_schema.tables
-                where table_schema = database()
-                  and table_name in ('invoice', 'invoice_item')
-                """);
+        long databaseBytes = databaseUsedBytes();
+        long billTableBytes = billTableUsedBytes();
         long limitBytes = configuredStorageLimitMb > 0
                 ? configuredStorageLimitMb * 1024L * 1024L
                 : 0;
@@ -132,5 +124,63 @@ public class InvoiceStorageService {
     private long queryLong(String sql) {
         Long value = jdbcTemplate.queryForObject(sql, Long.class);
         return value == null ? 0 : value;
+    }
+
+    private long databaseUsedBytes() {
+        String database = databaseProductName();
+        try {
+            if (database.contains("postgres")) {
+                return queryLong("select pg_database_size(current_database())");
+            }
+
+            if (database.contains("mysql") || database.contains("mariadb")) {
+                return queryLong("""
+                        select coalesce(sum(data_length + index_length), 0)
+                        from information_schema.tables
+                        where table_schema = database()
+                        """);
+            }
+        } catch (Exception ignored) {
+            return 0;
+        }
+
+        return 0;
+    }
+
+    private long billTableUsedBytes() {
+        String database = databaseProductName();
+        try {
+            if (database.contains("postgres")) {
+                return queryLong("""
+                        select coalesce(sum(pg_total_relation_size(to_regclass(table_name))), 0)
+                        from (values ('invoice'), ('invoice_item')) as tables(table_name)
+                        where to_regclass(table_name) is not null
+                        """);
+            }
+
+            if (database.contains("mysql") || database.contains("mariadb")) {
+                return queryLong("""
+                        select coalesce(sum(data_length + index_length), 0)
+                        from information_schema.tables
+                        where table_schema = database()
+                          and table_name in ('invoice', 'invoice_item')
+                        """);
+            }
+        } catch (Exception ignored) {
+            return 0;
+        }
+
+        return 0;
+    }
+
+    private String databaseProductName() {
+        try {
+            return jdbcTemplate.execute((java.sql.Connection connection) -> {
+                DatabaseMetaData metadata = connection.getMetaData();
+                return metadata.getDatabaseProductName().toLowerCase();
+            });
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 }

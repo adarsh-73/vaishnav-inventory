@@ -95,13 +95,18 @@ public class CryptoTradingService {
 
     public Map<String, Object> getDashboard() {
         Map<String, Object> response = new LinkedHashMap<>();
-        List<Map<String, Object>> signals = SYMBOLS.stream()
-                .map(this::buildSignal)
-                .toList();
 
         removeLegacyRunningTrades();
         List<CryptoPaperTrade> trades = paperTradeRepository.findByCreatedAtAfter(LocalDateTime.now().minusDays(65)).stream()
                 .filter(trade -> ENGINE_VERSION.equals(trade.getEngineVersion()))
+                .toList();
+        List<CryptoDecisionAudit> recentDecisions = decisionAuditRepository.findTop50ByOrderByIdDesc();
+        Map<String, CryptoDecisionAudit> latestBySymbol = new LinkedHashMap<>();
+        for (CryptoDecisionAudit audit : recentDecisions) {
+            latestBySymbol.putIfAbsent(audit.getSymbol(), audit);
+        }
+        List<Map<String, Object>> signals = SYMBOLS.stream()
+                .map(symbol -> cachedSignal(symbol, latestBySymbol.get(symbol), trades))
                 .toList();
 
         response.put("mode", "REAL_CANDLE_AUTONOMOUS_PAPER");
@@ -109,8 +114,8 @@ public class CryptoTradingService {
         response.put("cashMode", "DISABLED");
         response.put("practiceScoutEnabled", practiceScoutEnabled);
         response.put("maxDailyTrades", MAX_DAILY_PAPER_TRADES);
-        response.put("fearGreed", marketDataService.getFearGreed());
-        response.put("macroNews", macroNewsService.getContext());
+        response.put("fearGreed", Map.of("status", "CACHED_DASHBOARD", "note", "Fresh fear/greed updates run during paper scan."));
+        response.put("macroNews", Map.of("status", "CACHED_DASHBOARD", "note", "Fresh macro/news updates run during paper scan."));
         response.put("aiProviderStatus", aiConsensusService.providerStatus());
         response.put("riskPolicy", Map.of(
                 "paperEquity", PAPER_ACCOUNT_EQUITY,
@@ -123,6 +128,8 @@ public class CryptoTradingService {
                 "authority", "DETERMINISTIC_RISK_ENGINE"
         ));
         response.put("dataPolicy", "No simulated market values. Missing providers return NOT_CONFIGURED or UNAVAILABLE.");
+        response.put("dashboardSource", "FAST_DATABASE_SNAPSHOT");
+        response.put("dashboardNote", "Dashboard opens from saved decisions/trades. Use Run paper scan for a fresh external-market decision.");
         response.put("symbols", signals);
         response.put("report", buildReport(trades));
         response.put("openTrades", trades.stream()
@@ -136,12 +143,51 @@ public class CryptoTradingService {
                 .toList());
         response.put("learningReport", buildLearningReport(trades));
         response.put("twoMonthReport", buildTwoMonthReport(trades));
-        response.put("recentDecisions", decisionAuditRepository.findTop50ByOrderByIdDesc().stream()
+        response.put("recentDecisions", recentDecisions.stream()
                 .map(this::decisionSummary)
                 .toList());
         response.put("binance", cryptoExchangeService.testnetClientStatus());
 
         return response;
+    }
+
+    private Map<String, Object> cachedSignal(String symbol, CryptoDecisionAudit audit, List<CryptoPaperTrade> trades) {
+        Map<String, Object> signal = new LinkedHashMap<>();
+        Optional<CryptoPaperTrade> runningTrade = trades.stream()
+                .filter(trade -> symbol.equals(trade.getSymbol()) && "RUNNING".equals(trade.getStatus()))
+                .findFirst();
+
+        signal.put("symbol", symbol);
+        signal.put("source", "FAST_DATABASE_SNAPSHOT");
+        signal.put("dataReadiness", audit == null ? "WAITING_FOR_FIRST_SCAN" : audit.getDataReadiness());
+        signal.put("candidateSignal", audit == null ? "NO_TRADE" : audit.getCandidateSignal());
+        signal.put("finalSignal", audit == null ? "NO_TRADE" : audit.getFinalSignal());
+        signal.put("allowed", audit != null && Boolean.TRUE.equals(audit.getAllowed()));
+        signal.put("finalScore", audit == null ? 0 : audit.getFinalScore());
+        signal.put("blockReason", audit == null ? "Fresh scan abhi saved nahi hai." : audit.getBlockReason());
+        signal.put("engineVersion", ENGINE_VERSION);
+        signal.put("decisionAuditId", audit == null ? null : audit.getId());
+        signal.put("lastDecisionAt", audit == null ? null : audit.getCreatedAt());
+
+        runningTrade.ifPresentOrElse(trade -> {
+            signal.put("currentPrice", trade.getEntryPrice());
+            signal.put("entryPrice", trade.getEntryPrice());
+            signal.put("stopLoss", trade.getStopLoss());
+            signal.put("takeProfit", trade.getTakeProfit());
+            signal.put("runningTradeId", trade.getId());
+            signal.put("runningTradeSide", trade.getSide());
+        }, () -> {
+            signal.put("currentPrice", 0);
+            signal.put("entryPrice", null);
+            signal.put("stopLoss", null);
+            signal.put("takeProfit", null);
+            signal.put("runningTradeId", null);
+            signal.put("runningTradeSide", null);
+        });
+
+        signal.put("technicalSummary", audit == null ? "Run paper scan for fresh market data." : "Latest saved decision snapshot.");
+        signal.put("aiConsensus", Map.of("status", "CACHED", "note", "AI refresh runs during paper scan."));
+        return signal;
     }
 
     private Map<String, Object> decisionSummary(CryptoDecisionAudit audit) {
