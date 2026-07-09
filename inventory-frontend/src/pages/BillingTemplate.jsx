@@ -452,7 +452,7 @@ export default function VaishnavFinalInvoice() {
   };
 
   return (
-    <div style={{ background: '#f1f5f9', minHeight: '100vh', padding: '30px 0', fontFamily: 'Arial, sans-serif', overflowY: 'auto' }}>
+    <div className="billing-page-shell" style={{ background: '#f1f5f9', minHeight: '100vh', padding: '30px 0', fontFamily: 'Arial, sans-serif', overflowY: 'auto' }}>
       <style>{`
         @page { size: A4 portrait; margin: 7mm; }
 
@@ -508,9 +508,9 @@ export default function VaishnavFinalInvoice() {
       `}</style>
       
       {/* CONTROLS ENGINE DESK (Es block ko print me bilkul gayab hona hi padega) */}
-      <div className="no-print" style={styles.topControlPanel}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-          <span style={{ fontWeight: 'bold', color: '#0F2963' }}>⚙️ Vaishnav Invoice Engine Control Desk</span>
+      <div className="no-print invoice-control-desk" style={styles.topControlPanel}>
+        <div className="invoice-control-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <span className="invoice-control-title" style={{ fontWeight: 'bold', color: '#0F2963' }}>⚙️ Vaishnav Invoice Engine Control Desk</span>
           <div style={styles.actionButtonsRow}>
             <button onClick={startNewBill} style={styles.downloadActionBtn}>New Bill</button>
             <button onClick={handleSaveBill} disabled={isSaving} style={isSaving ? { ...styles.insertRowBtn, opacity: 0.65, cursor: "not-allowed" } : styles.insertRowBtn}>{isSaving ? "Saving..." : "Save Bill"}</button>
@@ -519,7 +519,7 @@ export default function VaishnavFinalInvoice() {
             <button onClick={handleWhatsAppSend} style={styles.whatsappActionBtn}>WhatsApp Send</button>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px', marginBottom: '12px' }}>
+        <div className="billing-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px', marginBottom: '12px' }}>
           <input type="text" placeholder="Customer Name" value={customerName} onChange={e => setCustomerName(e.target.value)} style={styles.panelInput} />
           <input type="text" placeholder="Mobile No" value={mobileNo} onChange={e => setMobileNo(e.target.value)} style={styles.panelInput} />
           <input type="text" placeholder="Vehicle No" value={vehicleNo} onChange={e => setVehicleNo(e.target.value)} style={styles.panelInput} />
@@ -533,7 +533,7 @@ export default function VaishnavFinalInvoice() {
           <input type="number" placeholder="Discount (optional)" value={discountAmount} onChange={e => setDiscountAmount(e.target.value)} style={styles.panelInput} />
           <input type="text" placeholder="Discount note (optional)" value={discountNote} onChange={e => setDiscountNote(e.target.value)} style={styles.panelInput} />
         </div>
-        <div style={styles.splitSummaryBar}>
+        <div className="billing-split-summary" style={styles.splitSummaryBar}>
           <span>Washing/Labour: ₹ {billSplit.serviceProfit}</span>
           <span>Accessories Sale: ₹ {billSplit.accessories}</span>
           <span>Accessories Profit: ₹ {billSplit.accessoriesProfit}</span>
@@ -541,7 +541,7 @@ export default function VaishnavFinalInvoice() {
           <span>Discount: ₹ {discountValue}</span>
           <span>Detected: {getInvoiceBusinessCategory({ items })}</span>
         </div>
-        <form onSubmit={handleAddItem} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <form className="billing-entry-form" onSubmit={handleAddItem} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <select value={newItemMode} onChange={e => {
             setNewItemMode(e.target.value);
             if (e.target.value !== "inventory") {
@@ -555,7 +555,7 @@ export default function VaishnavFinalInvoice() {
             <option value="service">Manual Washing/Labour</option>
             <option value="inventory">Inventory Product (Stock Out)</option>
           </select>
-          <div style={styles.productSearchBox}>
+          <div className="productSearchBox" style={styles.productSearchBox}>
             <input
               type="text"
               placeholder="Inventory product search: name, SR, barcode..."
@@ -604,7 +604,7 @@ export default function VaishnavFinalInvoice() {
           )}
           <button type="submit" style={styles.insertRowBtn}>{editingItemId ? "Update Item" : "+ Add Item"}</button>
         </form>
-        <div style={styles.qrControlsRow}>
+        <div className="billing-qr-row" style={styles.qrControlsRow}>
           <input type="text" placeholder="UPI ID" value={upiId} onChange={e => setUpiId(e.target.value)} style={{ ...styles.panelInput, flex: 1 }} />
           <input type="file" accept="image/*" onChange={handleQrUpload} style={{ ...styles.panelInput, flex: 1 }} />
           <div style={styles.qrAmountHint}>
@@ -824,7 +824,7 @@ export default function VaishnavFinalInvoice() {
 
         </div>
 
-        <div className="no-print" style={styles.billBottomActionBar}>
+        <div className="no-print billBottomActionBar" style={styles.billBottomActionBar}>
           <button onClick={handleSaveBill} disabled={isSaving} style={isSaving ? { ...styles.insertRowBtn, opacity: 0.65, cursor: "not-allowed" } : styles.insertRowBtn}>{isSaving ? "Saving..." : "Save Bill"}</button>
           <button onClick={handlePrint} style={styles.printActionBtn}>Print</button>
           <button onClick={handleDownloadPdf} style={styles.downloadActionBtn}>Download PDF</button>

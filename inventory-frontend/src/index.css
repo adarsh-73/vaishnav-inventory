@@ -1,6 +1,8 @@
 body {
   margin: 0;
-  background: #eef2f6;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(249, 217, 137, 0.20), transparent 28%),
+    linear-gradient(135deg, #eef3f8 0%, #f8fafc 48%, #eef2f6 100%);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
@@ -16,6 +18,13 @@ body {
   color: #0f2963;
   font-size: 18px;
   font-weight: 800;
+}
+
+.app-content {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 80% 0%, rgba(196, 154, 69, 0.14), transparent 25%),
+    linear-gradient(180deg, #f8fafc 0%, #eef4f8 100%);
 }
 
 * {
@@ -72,6 +81,10 @@ button,
   will-change: transform;
 }
 
+button {
+  letter-spacing: -0.01em;
+}
+
 button:not(:disabled):hover,
 .sidebar-link:hover,
 [role="button"]:hover {
@@ -110,6 +123,20 @@ select:focus,
 textarea:focus {
   border-color: #0f2963 !important;
   box-shadow: 0 0 0 3px rgba(15, 41, 99, 0.10);
+}
+
+.app-content input,
+.app-content select,
+.app-content textarea {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.app-content > div > section,
+.app-content > div > div[style*="box-shadow"],
+.app-content section[style*="box-shadow"] {
+  box-shadow:
+    0 18px 45px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
 }
 
 table {
@@ -189,11 +216,28 @@ table {
   display: flex;
   align-items: center;
   gap: 10px;
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(249, 217, 137, 0.14) 46%, transparent 78%);
+  opacity: 0;
+  transform: translateX(-35%);
+  transition: opacity 150ms ease, transform 250ms ease;
 }
 
 .sidebar-link:hover {
   border-color: rgba(249, 217, 137, 0.46) !important;
   background: rgba(30, 41, 59, 0.96) !important;
+}
+
+.sidebar-link:hover::after {
+  opacity: 1;
+  transform: translateX(20%);
 }
 
 .sidebar-link.is-active {
@@ -233,7 +277,7 @@ table {
   }
 
   body {
-    background: #f3f6fa;
+    background: #f5f7fb;
     position: static !important;
     touch-action: pan-y;
     overflow: hidden !important;
@@ -264,7 +308,9 @@ table {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
-    background: #f3f6fa;
+    background:
+      radial-gradient(circle at 12% 0%, rgba(249, 217, 137, 0.22), transparent 32%),
+      linear-gradient(180deg, #f8fafc 0%, #edf3f8 100%);
   }
 
   .app-sidebar {
@@ -305,7 +351,8 @@ table {
     overflow-x: auto !important;
     overflow-y: hidden !important;
     padding: 9px 10px calc(9px + env(safe-area-inset-bottom, 0px)) !important;
-    background: rgba(7, 22, 53, 0.97) !important;
+    background: rgba(7, 22, 53, 0.96) !important;
+    backdrop-filter: blur(14px);
     border-top: 1px solid rgba(249, 217, 137, 0.24) !important;
     box-shadow: 0 -10px 28px rgba(2, 6, 23, 0.22) !important;
     -webkit-overflow-scrolling: touch;
@@ -403,18 +450,22 @@ table {
   button {
     max-width: 100% !important;
     min-width: 0 !important;
-    min-height: 42px;
+    min-height: 46px;
   }
 
   input,
   select,
   textarea {
     font-size: 16px !important;
-    border-radius: 10px !important;
+    border-radius: 14px !important;
+    padding: 12px 13px !important;
+    border-color: #d7e0ea !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
   }
 
   button {
-    border-radius: 10px !important;
+    border-radius: 14px !important;
+    font-weight: 900 !important;
   }
 
   h1 {
@@ -503,9 +554,128 @@ table {
     height: auto !important;
     overflow: visible !important;
     transform-origin: top left;
-    zoom: 0.46;
+    zoom: 0.42;
     margin-left: auto !important;
     margin-right: auto !important;
+  }
+
+  .billing-page-shell {
+    padding: 10px 10px 18px !important;
+  }
+
+  .invoice-control-desk {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 0 14px !important;
+    padding: 14px !important;
+    border-radius: 22px !important;
+    border: 1px solid rgba(196, 154, 69, 0.24) !important;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96)) !important;
+    box-shadow:
+      0 18px 42px rgba(15, 23, 42, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  }
+
+  .invoice-control-head {
+    display: grid !important;
+    gap: 11px !important;
+    align-items: stretch !important;
+  }
+
+  .invoice-control-title {
+    display: block;
+    padding: 9px 11px;
+    border-radius: 15px;
+    background: linear-gradient(135deg, #071635, #0f2963);
+    color: #f9d989 !important;
+    font-size: 13px !important;
+    letter-spacing: 0.01em;
+  }
+
+  .invoice-control-desk [style*="justify-content: flex-end"] {
+    justify-content: stretch !important;
+  }
+
+  .invoice-control-desk [style*="justify-content: flex-end"] button,
+  .billBottomActionBar button {
+    flex: 1 1 135px !important;
+  }
+
+  .billing-meta-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    margin-bottom: 11px !important;
+  }
+
+  .billing-meta-grid input,
+  .billing-meta-grid select {
+    width: 100% !important;
+    min-height: 52px !important;
+  }
+
+  .billing-entry-form {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+  }
+
+  .billing-entry-form > select,
+  .billing-entry-form > .productSearchBox,
+  .billing-entry-form > input[type="text"],
+  .billing-entry-form > button {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+  }
+
+  .billing-entry-form > input[type="number"] {
+    width: 100% !important;
+  }
+
+  .billing-entry-form button[type="submit"] {
+    min-height: 54px !important;
+    background: linear-gradient(135deg, #c49a45, #9c742a) !important;
+    box-shadow: 0 12px 24px rgba(156, 116, 42, 0.22) !important;
+  }
+
+  .billing-qr-row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 9px !important;
+  }
+
+  .billing-qr-row > * {
+    width: 100% !important;
+  }
+
+  .billing-split-summary {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 7px !important;
+    padding: 9px !important;
+    border-radius: 15px !important;
+    background: #f8fafc !important;
+  }
+
+  .billing-split-summary span {
+    display: block;
+    padding: 8px 9px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    font-size: 11px !important;
+    line-height: 1.25;
+  }
+
+  .billBottomActionBar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 9px !important;
+  }
+
+  .billBottomActionBar button:first-child,
+  .billBottomActionBar button:last-child {
+    grid-column: 1 / -1 !important;
   }
 
   #old-bill-print-sheet {

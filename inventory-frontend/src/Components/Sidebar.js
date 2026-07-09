@@ -53,13 +53,14 @@ function Sidebar() {
 const sidebarStyle = {
   width: "280px",
   height: "100vh",
-  background: "linear-gradient(180deg, #071635 0%, #0f172a 68%, #111827 100%)",
+  background: "radial-gradient(circle at 28% 0%, rgba(249,217,137,0.16), transparent 32%), linear-gradient(180deg, #06122c 0%, #071635 46%, #0f172a 100%)",
   color: "white",
   padding: "20px",
   boxSizing: "border-box",
   borderRight: "1px solid rgba(249,217,137,0.2)",
   position: "sticky",
   top: 0,
+  boxShadow: "16px 0 48px rgba(2, 6, 23, 0.16)",
 };
 
 const brandBox = {
@@ -87,7 +88,7 @@ const logoRing = {
   borderRadius: "50%",
   background: "linear-gradient(135deg, #c49a45, #f9d989 45%, #9c742a)",
   padding: "4px",
-  boxShadow: "0 8px 18px rgba(0,0,0,0.28)",
+  boxShadow: "0 12px 26px rgba(0,0,0,0.32), 0 0 0 1px rgba(249,217,137,0.22)",
 };
 
 const logoLetter = {
@@ -142,13 +143,13 @@ const menuListStyle = {
 const menuStyle = {
   color: "#f8fafc",
   textDecoration: "none",
-  padding: "13px 14px",
-  background: "rgba(30,41,59,0.78)",
-  border: "1px solid rgba(148,163,184,0.16)",
-  borderRadius: "7px",
+  padding: "14px 14px",
+  background: "linear-gradient(135deg, rgba(30,41,59,0.86), rgba(15,23,42,0.78))",
+  border: "1px solid rgba(226,232,240,0.13)",
+  borderRadius: "14px",
   fontSize: "15px",
   fontWeight: "700",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 24px rgba(2,6,23,0.14)",
 };
 
 export default Sidebar;
