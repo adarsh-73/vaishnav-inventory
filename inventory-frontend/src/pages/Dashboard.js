@@ -93,8 +93,8 @@ function Dashboard() {
   const openBreakdown = (key) => setActiveBreakdown((current) => current === key ? "" : key);
 
   return (
-    <div style={pageStyle}>
-      <section style={heroStyle}>
+    <div className="dashboard-page" style={pageStyle}>
+      <section className="dashboard-hero" style={heroStyle}>
         <div style={brandBlock}>
           <VaishnavLogo />
           <div>
@@ -103,7 +103,7 @@ function Dashboard() {
             <div style={subtitleStyle}>Current month: {report.monthLabel}. Old month statement alag se dekh sakte hain.</div>
           </div>
         </div>
-        <div style={heroMetric}>
+        <div className="dashboard-hero-metric" style={heroMetric}>
           <span style={heroMetricLabel}>This Month Net Profit</span>
           <strong style={heroMetricValue}>{formatMoney(netProfit)}</strong>
           <button type="button" onClick={() => navigate("/monthly-statement")} style={statementBtn}>Old Month Statement</button>
@@ -123,7 +123,7 @@ function Dashboard() {
         </div>
       )}
 
-      <div style={cardGrid}>
+      <div className="dashboard-card-grid" style={cardGrid}>
         <MetricCard label="Washing / Labour Profit" value={formatMoney(washingProfit)} accent="#0f766e" onClick={() => openBreakdown("washing")} />
         <MetricCard label="Accessories Sale" value={formatMoney(totals.accessories)} accent="#0f2963" onClick={() => openBreakdown("accessoriesSale")} />
         <MetricCard label="Accessories Profit" value={formatMoney(totals.accessoriesProfit)} accent="#15803d" onClick={() => openBreakdown("accessoriesProfit")} />
@@ -139,7 +139,7 @@ function Dashboard() {
       </div>
 
       {activeBreakdown && (
-        <section style={widePanelStyle}>
+        <section className="dashboard-panel dashboard-panel-wide" style={widePanelStyle}>
           <div style={panelHeader}>
             <h2 style={panelTitle}>{breakdownConfig.title}</h2>
             <button type="button" onClick={() => setActiveBreakdown("")} style={refreshBtn}>Close</button>
@@ -204,7 +204,7 @@ function Dashboard() {
       )}
 
       <div style={panelGrid}>
-        <section style={panelStyle}>
+        <section className="dashboard-panel" style={panelStyle}>
           <div style={panelHeader}>
             <h2 style={panelTitle}>Profit Breakdown</h2>
           </div>
@@ -231,7 +231,7 @@ function Dashboard() {
           </table>
         </section>
 
-        <section style={panelStyle}>
+        <section className="dashboard-panel" style={panelStyle}>
           <div style={panelHeader}>
             <h2 style={panelTitle}>This Month Bills</h2>
             <button onClick={load} style={refreshBtn}>Refresh</button>
@@ -261,7 +261,7 @@ function Dashboard() {
           </table>
         </section>
 
-        <section style={panelStyle}>
+        <section className="dashboard-panel" style={panelStyle}>
           <div style={panelHeader}>
             <h2 style={panelTitle}>This Month Daily Book</h2>
           </div>
@@ -306,6 +306,7 @@ function VaishnavLogo() {
 function MetricCard({ label, value, accent, onClick }) {
   return (
     <div
+      className="dashboard-metric-card"
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -544,8 +545,8 @@ function getDailyTotals(rows) {
   return Array.from(byDate.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 }
 
-const pageStyle = { padding: "28px", background: "#eef2f6", minHeight: "100vh", color: "#0f172a" };
-const heroStyle = { background: "linear-gradient(135deg, #071635 0%, #0f2963 58%, #12233f 100%)", color: "#ffffff", borderRadius: "8px", padding: "24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "18px", boxShadow: "0 14px 34px rgba(15, 41, 99, 0.22)", marginBottom: "22px" };
+const pageStyle = { padding: "28px", background: "transparent", minHeight: "100vh", color: "#0f172a" };
+const heroStyle = { background: "radial-gradient(circle at 12% 8%, rgba(249,217,137,0.22), transparent 30%), linear-gradient(135deg, #06122c 0%, #0f2963 58%, #12233f 100%)", color: "#ffffff", borderRadius: "24px", padding: "26px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "18px", boxShadow: "0 24px 60px rgba(15, 41, 99, 0.26)", marginBottom: "22px", border: "1px solid rgba(249,217,137,0.22)", position: "relative", overflow: "hidden" };
 const brandBlock = { display: "flex", alignItems: "center", gap: "18px" };
 const eyebrowStyle = { color: "#f9d989", fontSize: "12px", fontWeight: "800", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "5px" };
 const titleStyle = { margin: 0, color: "#ffffff", fontSize: "30px", fontWeight: "900" };
@@ -554,17 +555,17 @@ const logoShell = { width: "104px", minWidth: "104px", height: "116px", position
 const logoRing = { width: "86px", height: "86px", borderRadius: "50%", background: "linear-gradient(135deg, #c49a45, #f9d989 45%, #9c742a)", padding: "5px", boxShadow: "0 10px 22px rgba(0,0,0,0.22)" };
 const logoLetter = { width: "100%", height: "100%", borderRadius: "50%", background: "radial-gradient(circle at 35% 25%, #203a72, #071635 70%)", border: "2px solid rgba(249,217,137,0.65)", display: "flex", alignItems: "center", justifyContent: "center", color: "#f9d989", fontFamily: "Georgia, serif", fontSize: "48px", fontWeight: "900" };
 const logoRibbon = { position: "absolute", bottom: "7px", background: "#f9d989", color: "#071635", borderRadius: "4px", padding: "4px 10px", fontSize: "10px", fontWeight: "900", letterSpacing: "1px", boxShadow: "0 6px 14px rgba(0,0,0,0.18)" };
-const heroMetric = { minWidth: "190px", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(249,217,137,0.45)", borderRadius: "8px", padding: "16px", textAlign: "right" };
+const heroMetric = { minWidth: "220px", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(249,217,137,0.45)", borderRadius: "18px", padding: "18px", textAlign: "right", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)" };
 const heroMetricLabel = { display: "block", color: "#cbd5e1", fontSize: "12px", fontWeight: "700", marginBottom: "7px" };
 const heroMetricValue = { display: "block", color: "#f9d989", fontSize: "28px", fontWeight: "900" };
-const statementBtn = { marginTop: "12px", border: "1px solid rgba(249,217,137,0.75)", background: "#f9d989", color: "#071635", borderRadius: "5px", padding: "8px 11px", fontWeight: "900", cursor: "pointer" };
+const statementBtn = { marginTop: "12px", border: "1px solid rgba(249,217,137,0.75)", background: "linear-gradient(135deg, #f9d989, #c49a45)", color: "#071635", borderRadius: "999px", padding: "9px 13px", fontWeight: "900", cursor: "pointer", boxShadow: "0 10px 22px rgba(196,154,69,0.22)" };
 const cardGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "16px", marginBottom: "18px" };
-const cardStyle = { background: "#ffffff", padding: "18px", borderRadius: "8px", borderTop: "4px solid #0f2963", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", minHeight: "92px", display: "flex", flexDirection: "column", justifyContent: "space-between" };
+const cardStyle = { background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))", padding: "18px", borderRadius: "18px", borderTop: "4px solid #0f2963", boxShadow: "0 16px 36px rgba(15, 23, 42, 0.08)", minHeight: "104px", display: "flex", flexDirection: "column", justifyContent: "space-between", borderLeft: "1px solid rgba(226,232,240,0.8)", borderRight: "1px solid rgba(226,232,240,0.8)", borderBottom: "1px solid rgba(226,232,240,0.8)" };
 const clickableCardStyle = { cursor: "pointer", outline: "none" };
 const cardLabel = { color: "#64748b", fontSize: "13px", fontWeight: "800", textTransform: "uppercase" };
 const cardValue = { fontSize: "26px", fontWeight: "900", marginTop: "12px" };
 const panelGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "18px" };
-const panelStyle = { background: "#ffffff", borderRadius: "8px", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.07)", overflow: "hidden", border: "1px solid #e2e8f0" };
+const panelStyle = { background: "rgba(255,255,255,0.96)", borderRadius: "20px", boxShadow: "0 16px 38px rgba(15, 23, 42, 0.08)", overflow: "hidden", border: "1px solid rgba(226,232,240,0.88)" };
 const widePanelStyle = { ...panelStyle, marginBottom: "18px" };
 const panelHeader = { padding: "15px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" };
 const panelTitle = { margin: 0, fontSize: "17px", color: "#0f2963" };

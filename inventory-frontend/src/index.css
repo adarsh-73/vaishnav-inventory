@@ -29,9 +29,6 @@ body {
 
 * {
   box-sizing: border-box;
-}
-
-* {
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -246,6 +243,25 @@ table {
   color: #f9d989 !important;
 }
 
+.dashboard-metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.dashboard-metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 44px;
+  background: linear-gradient(90deg, rgba(249, 217, 137, 0.16), transparent);
+  pointer-events: none;
+}
+
+.dashboard-metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 22px 46px rgba(15, 23, 42, 0.12) !important;
+}
+
 .nav-icon {
   width: 25px;
   height: 25px;
@@ -431,6 +447,87 @@ table {
 
   .app-content > div[style] {
     padding: 12px !important;
+  }
+
+  .dashboard-page {
+    padding: 12px !important;
+  }
+
+  .dashboard-hero {
+    display: grid !important;
+    gap: 14px !important;
+    padding: 18px !important;
+    border-radius: 22px !important;
+    margin-bottom: 14px !important;
+  }
+
+  .dashboard-hero > div:first-child {
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .dashboard-hero [aria-label="Vaishnav logo"] {
+    width: 68px !important;
+    min-width: 68px !important;
+    height: 78px !important;
+  }
+
+  .dashboard-hero [style*="86px"] {
+    width: 58px !important;
+    height: 58px !important;
+  }
+
+  .dashboard-hero [style*="48px"] {
+    font-size: 32px !important;
+  }
+
+  .dashboard-hero h1 {
+    font-size: 21px !important;
+    line-height: 1.12 !important;
+  }
+
+  .dashboard-hero-metric {
+    width: 100% !important;
+    min-width: 0 !important;
+    text-align: left !important;
+    display: grid !important;
+    gap: 8px !important;
+  }
+
+  .dashboard-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .dashboard-metric-card {
+    min-height: 118px !important;
+    padding: 14px !important;
+    border-radius: 18px !important;
+  }
+
+  .dashboard-metric-card span {
+    font-size: 10px !important;
+    line-height: 1.25 !important;
+  }
+
+  .dashboard-metric-card strong {
+    font-size: 19px !important;
+    line-height: 1.12 !important;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-panel {
+    border-radius: 18px !important;
+    margin-bottom: 12px;
+  }
+
+  .dashboard-panel table {
+    min-width: 520px !important;
+  }
+
+  .dashboard-panel-wide {
+    overflow-x: auto !important;
   }
 
   form[style],
