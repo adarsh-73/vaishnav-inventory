@@ -41,18 +41,20 @@ public class DashboardController {
         LocalDateTime start = monthStart.atStartOfDay();
         LocalDateTime end = monthEnd.atStartOfDay();
 
-        double invoiceProfit = value(invoiceItemRepository.sumProfitBetween(start, end));
-        double invoiceSales = value(invoiceItemRepository.sumSaleBetween(start, end));
+        double washingProfit = value(invoiceItemRepository.sumServiceProfitBetween(start, end));
+        double accessoriesProfit = value(invoiceItemRepository.sumAccessoriesProfitBetween(start, end));
+        double accessoriesSales = value(invoiceItemRepository.sumAccessoriesSaleBetween(start, end));
         double paidExpense = value(dailyBookEntryRepository.sumPaidExpenseBetween(monthStart, monthEnd));
         double udhar = value(invoiceRepository.sumRemainingBetween(start, end))
                 + value(dailyBookEntryRepository.sumManualUdharBetween(monthStart, monthEnd));
         double invoiceTotal = value(invoiceRepository.sumTotalBetween(start, end));
-        double netProfit = invoiceProfit - paidExpense;
+        double grossProfit = washingProfit + accessoriesProfit;
+        double netProfit = grossProfit - paidExpense;
 
         Map<String, Object> totals = new LinkedHashMap<>();
-        totals.put("washing", 0);
-        totals.put("accessories", invoiceSales);
-        totals.put("accessoriesProfit", invoiceProfit);
+        totals.put("washing", washingProfit);
+        totals.put("accessories", accessoriesSales);
+        totals.put("accessoriesProfit", accessoriesProfit);
         totals.put("oldAccessoriesProfit", 0);
         totals.put("expense", paidExpense);
         totals.put("udhar", udhar);
@@ -60,7 +62,7 @@ public class DashboardController {
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("totals", totals);
-        response.put("grossProfit", invoiceProfit);
+        response.put("grossProfit", grossProfit);
         response.put("netProfit", netProfit);
         response.put("invoiceTotal", invoiceTotal);
         response.put("stockValue", value(productRepository.sumStockSaleValue()));
