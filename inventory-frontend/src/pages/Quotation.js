@@ -82,6 +82,19 @@ function Quotation() {
     setForm({ quotationNumber: `Q-${Date.now().toString().slice(-5)}`, quotationDate: todayDate(), customerName: "", mobileNumber: "", vehicleNumber: "", note: "Quotation valid for 7 days." });
   };
 
+  const deleteQuotation = async (quotation) => {
+    if (!quotation?.id) return;
+    const confirmed = window.confirm(`Quotation ${quotation.quotationNumber || quotation.id} delete karna hai?`);
+    if (!confirmed) return;
+
+    const response = await fetch(`${API_BASE}/quotations/${quotation.id}`, { method: "DELETE" });
+    if (!response.ok) return alert("Quotation delete nahi hua.");
+
+    if (editingId === quotation.id) newQuotation();
+    await loadQuotations();
+    alert("Quotation delete ho gaya.");
+  };
+
   return (
     <div style={pageStyle}>
       <style>{`@media print { .no-print { display: none !important; } body { background: #fff !important; } }`}</style>
@@ -101,7 +114,17 @@ function Quotation() {
         <button onClick={saveQuotation} style={primaryBtn}>{editingId ? "Update Quotation" : "Save Quotation"}</button>
         <button onClick={newQuotation} style={secondaryBtn}>New</button>
         <button onClick={() => window.print()} style={secondaryBtn}>Print</button>
-        {quotations.length > 0 && <div style={historyBox}>{quotations.slice(0, 5).map((q) => <button key={q.id} onClick={() => loadQuotation(q)} style={secondaryBtn}>{q.quotationNumber} - {q.customerName}</button>)}</div>}
+        {editingId && <button onClick={() => deleteQuotation({ id: editingId, quotationNumber: form.quotationNumber })} style={dangerBtn}>Delete This Quotation</button>}
+        {quotations.length > 0 && (
+          <div style={historyBox}>
+            {quotations.slice(0, 8).map((q) => (
+              <div key={q.id} style={historyItem}>
+                <button onClick={() => loadQuotation(q)} style={secondaryBtn}>{q.quotationNumber} - {q.customerName}</button>
+                <button onClick={() => deleteQuotation(q)} style={dangerBtn}>Delete</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={quoteSheet}>
@@ -127,7 +150,9 @@ const panelStyle = { background: "white", padding: "18px", borderRadius: "10px",
 const inputStyle = { padding: "11px", marginRight: "10px", marginBottom: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", minWidth: "170px" };
 const primaryBtn = { padding: "11px 18px", background: "#0f2963", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", marginRight: "8px" };
 const secondaryBtn = { padding: "10px 14px", background: "#ffffff", color: "#0f2963", border: "1px solid #0f2963", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", marginRight: "8px" };
+const dangerBtn = { padding: "10px 14px", background: "#dc2626", color: "#ffffff", border: "1px solid #dc2626", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", marginRight: "8px" };
 const historyBox = { marginTop: "12px", display: "flex", gap: "8px", flexWrap: "wrap" };
+const historyItem = { display: "flex", gap: "6px", alignItems: "center", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "5px" };
 const quoteSheet = { background: "#fff", width: "210mm", minHeight: "280mm", margin: "0 auto", padding: "15mm", boxSizing: "border-box", boxShadow: "0 6px 18px rgba(0,0,0,0.08)", borderTop: "8px solid #071635" };
 const quoteHeader = { display: "flex", justifyContent: "space-between", borderBottom: "3px solid #0f2963", paddingBottom: "14px", marginBottom: "18px", alignItems: "center" };
 const brandLockup = { display: "flex", alignItems: "center", gap: "14px" };
