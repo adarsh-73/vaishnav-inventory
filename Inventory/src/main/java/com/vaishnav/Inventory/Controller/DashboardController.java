@@ -1,5 +1,6 @@
 package com.vaishnav.Inventory.Controller;
 
+import com.vaishnav.Inventory.entity.DailyBookEntry;
 import com.vaishnav.Inventory.repository.DailyBookEntryRepository;
 import com.vaishnav.Inventory.repository.InvoiceItemRepository;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
@@ -13,6 +14,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @RestController
@@ -44,7 +47,15 @@ public class DashboardController {
         double washingProfit = value(invoiceItemRepository.sumServiceProfitBetween(start, end));
         double accessoriesProfit = value(invoiceItemRepository.sumAccessoriesProfitBetween(start, end));
         double accessoriesSales = value(invoiceItemRepository.sumAccessoriesSaleBetween(start, end));
-        double paidExpense = value(dailyBookEntryRepository.sumPaidExpenseBetween(monthStart, monthEnd));
+        List<DailyBookEntry> paidExpenseEntries = dailyBookEntryRepository.findPaidExpensesBetween(monthStart, monthEnd);
+        double stockPurchaseExpense = paidExpenseEntries.stream()
+                .filter(this::isStockPurchaseExpense)
+                .mapToDouble(entry -> value(entry.getAmount()))
+                .sum();
+        double paidExpense = paidExpenseEntries.stream()
+                .filter(entry -> !isStockPurchaseExpense(entry))
+                .mapToDouble(entry -> value(entry.getAmount()))
+                .sum();
         double udhar = value(invoiceRepository.sumRemainingBetween(start, end))
                 + value(dailyBookEntryRepository.sumManualUdharBetween(monthStart, monthEnd));
         double invoiceTotal = value(invoiceRepository.sumTotalBetween(start, end));
@@ -57,6 +68,7 @@ public class DashboardController {
         totals.put("accessoriesProfit", accessoriesProfit);
         totals.put("oldAccessoriesProfit", 0);
         totals.put("expense", paidExpense);
+        totals.put("stockPurchaseExpense", stockPurchaseExpense);
         totals.put("udhar", udhar);
         totals.put("invoiceTotal", invoiceTotal);
 
@@ -75,5 +87,21 @@ public class DashboardController {
 
     private double value(Number number) {
         return number == null ? 0 : number.doubleValue();
+    }
+
+    private boolean isStockPurchaseExpense(DailyBookEntry entry) {
+        String text = ((entry.getPartyName() == null ? "" : entry.getPartyName()) + " "
+                + (entry.getNote() == null ? "" : entry.getNote())).toLowerCase(Locale.ROOT);
+        if (text.contains("service charge") || text.contains("labour") || text.contains("labor")
+                || text.contains("rent") || text.contains("fauke")) {
+            return false;
+        }
+        return text.contains("spare") || text.contains("parts") || text.contains("seat cover")
+                || text.contains("indicator") || text.contains("parking") || text.contains("led")
+                || text.contains("lead") || text.contains("bulb") || text.contains("light")
+                || text.contains("air filter") || text.contains("oil filter") || text.contains("engine oil")
+                || text.contains("mud flap") || text.contains("door visor") || text.contains("ambient")
+                || text.contains("mirror") || text.contains("wiper") || text.contains("tape")
+                || text.contains("wire") || text.contains("cutter");
     }
 }

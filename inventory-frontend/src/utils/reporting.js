@@ -62,7 +62,7 @@ export function calculateReport({ invoices = [], dailyBook = [], monthKey = getC
       if (Number(invoice.remainingAmount || 0) > 0) sum.udhar += Number(invoice.remainingAmount || 0);
       return sum;
     },
-    { washing: 0, accessories: 0, accessoriesProfit: 0, oldAccessories: 0, oldAccessoriesProfit: 0, expense: 0, udhar: 0 }
+    { washing: 0, accessories: 0, accessoriesProfit: 0, oldAccessories: 0, oldAccessoriesProfit: 0, expense: 0, stockPurchaseExpense: 0, udhar: 0 }
   );
 
   const totals = monthDailyBook.reduce((sum, entry) => {
@@ -84,7 +84,10 @@ export function calculateReport({ invoices = [], dailyBook = [], monthKey = getC
       sum.accessories += amount;
       sum.accessoriesProfit += amount;
     }
-    if (entry.entryType === "expense") sum.expense += Number(entry.amount || 0);
+    if (entry.entryType === "expense") {
+      if (isStockPurchaseExpense(entry)) sum.stockPurchaseExpense += Number(entry.amount || 0);
+      else sum.expense += Number(entry.amount || 0);
+    }
     return sum;
   }, fromInvoices);
 
@@ -135,16 +138,17 @@ export function getStatementRows({ invoices = [], dailyBook = [], monthKey = get
     })
     .map((entry) => {
       const isExpense = entry.entryType === "expense";
+      const isStockPurchase = isExpense && isStockPurchaseExpense(entry);
       const isUdhar = entry.paymentStatus === "udhar";
       const amount = Number(entry.amount || 0);
       return {
         id: `daily-${entry.id}`,
         date: entry.entryDate || entry.createdDate,
-        type: isExpense ? "Expense" : isUdhar ? "Udhar" : isWashingEntry(entry) ? "Washing / Labour" : "Accessories",
+        type: isStockPurchase ? "Stock Purchase" : isExpense ? "Expense" : isUdhar ? "Udhar" : isWashingEntry(entry) ? "Washing / Labour" : "Accessories",
         party: entry.partyName || "-",
         note: entry.note || "-",
         income: !isExpense && !isUdhar ? amount : 0,
-        expense: isExpense ? amount : 0,
+        expense: isExpense && !isStockPurchase ? amount : 0,
         udhar: isUdhar ? amount : 0,
         profit: !isExpense && !isUdhar ? amount : 0
       };
@@ -157,4 +161,10 @@ export function getStatementRows({ invoices = [], dailyBook = [], monthKey = get
       balance += Number(row.income || 0) - Number(row.expense || 0);
       return { ...row, balance };
     });
+}
+
+export function isStockPurchaseExpense(entry) {
+  const text = `${entry?.partyName || ""} ${entry?.note || ""}`.toLowerCase();
+  if (/(service charge|labou?r|rent|fauke)/i.test(text)) return false;
+  return /(spare|parts|seat cover|indicator|parking|led|lead|bulb|light|air filter|oil filter|engine oil|mud flap|door visor|ambient|mirror|wiper|tape|wire|cutter)/i.test(text);
 }

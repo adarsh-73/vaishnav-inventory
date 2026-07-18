@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiRequest, formatInvoiceCategory, getInvoiceCategoryTotals, getInvoiceProfit, isWashingEntry } from "../utils/api";
-import { calculateReport, getCurrentMonthKey } from "../utils/reporting";
+import { calculateReport, getCurrentMonthKey, isStockPurchaseExpense } from "../utils/reporting";
 
 const DASHBOARD_CACHE_KEY = "vaishnav_dashboard_cache_v1";
 
@@ -68,7 +68,7 @@ function Dashboard() {
     () => calculateReport({ invoices, dailyBook, monthKey: currentMonthKey }),
     [dailyBook, invoices, currentMonthKey]
   );
-  const totals = summary?.totals || report.totals;
+  const totals = { ...report.totals, ...(summary?.totals || {}) };
 
   const lowStockProducts = products.filter((product) =>
     Number(product.quantity || 0) <= Number(product.minimumStock || 1)
@@ -84,6 +84,7 @@ function Dashboard() {
   const stockValue = summary?.stockValue ?? products.reduce((sum, product) => sum + Number(product.quantity || 0) * Number(product.sellPrice || 0), 0);
   const invoiceTotal = summary?.invoiceTotal ?? report.invoiceTotal;
   const washingProfit = summary ? Number(totals.washing || 0) : report.washingProfit;
+  const stockPurchaseExpense = Number(totals.stockPurchaseExpense || 0);
   const grossProfit = summary?.grossProfit ?? report.grossProfit;
   const netProfit = summary?.netProfit ?? report.netProfit;
   const profitReason = netProfit < 0
@@ -97,7 +98,8 @@ function Dashboard() {
     { label: "Accessories Profit", note: "Selling price minus purchase price", amount: totals.accessoriesProfit, type: "plus" },
     { label: "Old Accessories Earning", note: "Purane saman ki direct earning", amount: totals.oldAccessoriesProfit, type: "plus" },
     { label: "Gross Profit", note: "Washing + accessories profit", amount: grossProfit, type: "total" },
-    { label: "Paid Daily Expense", note: "Sirf paid kharch minus hoga, udhar alag rahega", amount: totals.expense, type: "minus" },
+    { label: "Paid Daily Expense", note: "Sirf operating kharch minus hoga, stock purchase alag rahega", amount: totals.expense, type: "minus" },
+    { label: "Stock Purchase", note: "Resale saman, bill profit me cost already count hoti hai", amount: stockPurchaseExpense, type: "total" },
     { label: "Net Profit", note: "Gross profit - expense", amount: netProfit, type: "final" }
   ];
   const recentInvoices = report.invoices.slice().reverse().slice(0, 6);
@@ -105,7 +107,7 @@ function Dashboard() {
   const breakdownConfig = getBreakdownConfig(activeBreakdown);
   const breakdownRows = useMemo(() => getDashboardBreakdownRows(activeBreakdown, report, products), [activeBreakdown, products, report]);
   const breakdownDailyTotals = useMemo(() => getDailyTotals(breakdownRows), [breakdownRows]);
-  const unsoldRows = useMemo(() => getUnsoldStockRows(products, report.dailyBook), [products, report.dailyBook]);
+  const unsoldRows = useMemo(() => getUnsoldStockRows(products, report.dailyBook, report.invoices), [products, report.dailyBook, report.invoices]);
   const openBreakdown = (key) => setActiveBreakdown((current) => current === key ? "" : key);
 
   return (
@@ -152,6 +154,7 @@ function Dashboard() {
         <MetricCard label="Low Stock" value={lowStockCount} accent="#c2410c" onClick={() => goToLowStock()} />
         <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => openBreakdown("udhar")} />
         <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => navigate("/daily-book?type=expense")} />
+        <MetricCard label="Stock Purchase" value={formatMoney(stockPurchaseExpense)} accent="#6d4c1d" onClick={() => openBreakdown("stockPurchase")} />
       </div>
 
       <section className="dashboard-panel dashboard-panel-wide" style={explainPanelStyle}>
@@ -168,7 +171,7 @@ function Dashboard() {
           <div style={explainCard}>
             <span style={explainLabel}>Paid Expense</span>
             <strong style={negativeAmount}>{formatMoney(totals.expense)}</strong>
-            <p style={explainText}>Jo paid kharch Daily Book me hai, sirf wahi net profit se minus hota hai.</p>
+            <p style={explainText}>Sirf labour/service/bhada type kharcha net profit se minus hota hai. Resale stock purchase alag rahega.</p>
           </div>
           <div style={explainCard}>
             <span style={explainLabel}>Net Profit</span>
@@ -417,7 +420,8 @@ function getBreakdownConfig(type) {
     billing: { title: "This Month Billing Breakdown", totalTitle: "Daily Billing" },
     stockValue: { title: "Stock Value Breakdown", totalTitle: "Stock By Date" },
     udhar: { title: "Udhar Pending Breakdown", totalTitle: "Daily Udhar" },
-    expense: { title: "Paid Daily Expense Breakdown", totalTitle: "Daily Expense" }
+    expense: { title: "Paid Daily Expense Breakdown", totalTitle: "Daily Expense" },
+    stockPurchase: { title: "Stock Purchase Breakdown", totalTitle: "Daily Stock Purchase" }
   };
   return configs[type] || { title: "Dashboard Breakdown", totalTitle: "Daily Total" };
 }
@@ -441,6 +445,7 @@ function getDashboardBreakdownRows(type, report, products) {
   if (type === "stockValue") return getStockRows(products, true);
   if (type === "udhar") return getUdharRows(report);
   if (type === "expense") return getExpenseRows(report);
+  if (type === "stockPurchase") return getStockPurchaseRows(report);
   return [];
 }
 
@@ -583,13 +588,28 @@ function getBillingRows(report) {
 
 function getExpenseRows(report) {
   return (report.dailyBook || [])
-    .filter((entry) => entry.entryType === "expense")
+    .filter((entry) => entry.entryType === "expense" && !isStockPurchaseExpense(entry))
     .map((entry) => ({
       id: `expense-${entry.id}`,
       date: formatDate(entry.entryDate || entry.createdDate),
       source: "Daily Book",
       party: entry.partyName || "-",
       note: entry.note || "Expense",
+      amount: Number(entry.amount || 0),
+      target: `/daily-book?type=expense&entryId=${entry.id}`
+    }))
+    .sort(sortRowsByDateDesc);
+}
+
+function getStockPurchaseRows(report) {
+  return (report.dailyBook || [])
+    .filter((entry) => entry.entryType === "expense" && isStockPurchaseExpense(entry))
+    .map((entry) => ({
+      id: `stock-purchase-${entry.id}`,
+      date: formatDate(entry.entryDate || entry.createdDate),
+      source: "Daily Book",
+      party: entry.partyName || "-",
+      note: entry.note || "Stock purchase",
       amount: Number(entry.amount || 0),
       target: `/daily-book?type=expense&entryId=${entry.id}`
     }))
@@ -643,7 +663,7 @@ function getStockRows(products, useValue) {
     .sort(sortRowsByDateDesc);
 }
 
-function getUnsoldStockRows(products, dailyBook) {
+function getUnsoldStockRows(products, dailyBook, invoices) {
   const stockRows = (products || [])
     .filter((product) => Number(product.quantity || 0) > 0)
     .map((product) => ({
@@ -662,15 +682,20 @@ function getUnsoldStockRows(products, dailyBook) {
       .map((product) => String(product.productName || "").trim().toLowerCase())
       .filter(Boolean)
   );
+  const soldIndex = buildSoldItemIndex(invoices);
 
   const noteRows = (dailyBook || [])
     .filter((entry) => entry.entryType === "expense")
     .flatMap((entry) => parseStockLinesFromExpense(entry)
+      .map((line) => applySoldEstimate(line, soldIndex))
+      .filter((line) => line.remainingQty === null || line.remainingQty > 0)
       .filter((line) => !productNames.has(line.item.toLowerCase()))
       .map((line, index) => ({
         id: `expense-stock-${entry.id}-${index}`,
         item: line.item,
-        status: "Daily expense note me hai, Products stock me add/check karo",
+        status: line.remainingQty === null
+          ? "Expense note me hai, Products stock me add/check karo"
+          : `Possible bacha qty ${line.remainingQty}`,
         source: `Daily Book #${entry.id}`,
         note: line.raw,
         value: line.value,
@@ -702,11 +727,54 @@ function parseStockLinesFromExpense(entry) {
       const priceMatch = part.match(/\b(\d+)\s*(rs|rupees?)\b/i);
       return {
         item: cleaned || part,
+        matchKey: stockMatchKey(cleaned || part),
         raw: part,
         value: priceMatch ? Number(priceMatch[1]) : 0,
         qty: qtyMatch ? Number(qtyMatch[1]) : null
       };
     });
+}
+
+function buildSoldItemIndex(invoices) {
+  const sold = new Map();
+  (invoices || []).forEach((invoice) => {
+    (invoice.invoiceItems || invoice.items || []).forEach((item) => {
+      if (getInvoiceCategoryTotals({ invoiceItems: [item] }).accessories <= 0) return;
+      const name = item.description || item.productInvoiceitem?.productName || item.productName || "";
+      const key = stockMatchKey(name);
+      if (!key) return;
+      sold.set(key, (sold.get(key) || 0) + Number(item.quantity || 0));
+    });
+  });
+  return sold;
+}
+
+function applySoldEstimate(line, soldIndex) {
+  const key = line.matchKey;
+  if (!key) return { ...line, remainingQty: line.qty };
+  const soldQty = soldIndex.get(key) || 0;
+  if (!line.qty) {
+    return soldQty > 0 ? { ...line, remainingQty: 0 } : { ...line, remainingQty: null };
+  }
+  return { ...line, remainingQty: Math.max(0, Number(line.qty || 0) - soldQty) };
+}
+
+function stockMatchKey(value) {
+  const text = String(value || "").toLowerCase();
+  if (!text) return "";
+  if (text.includes("ambient")) return "ambient-light";
+  if (text.includes("seat cover")) return "seat-cover";
+  if (text.includes("parking")) return "parking-light";
+  if (text.includes("indicator")) return text.includes("fender") ? "fender-indicator" : "indicator";
+  if (text.includes("air filter")) return "air-filter";
+  if (text.includes("led") || text.includes("lead")) return "led-light";
+  if (text.includes("bulb")) return "bulb";
+  if (text.includes("door visor")) return "door-visor";
+  if (text.includes("mirror")) return "mirror";
+  if (text.includes("lock")) return "lock";
+  if (text.includes("mud flap")) return "mud-flap";
+  if (text.includes("light")) return "light";
+  return text.replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function sortRowsByDateDesc(a, b) {

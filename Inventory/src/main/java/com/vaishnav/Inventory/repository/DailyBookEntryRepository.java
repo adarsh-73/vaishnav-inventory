@@ -26,6 +26,15 @@ public interface DailyBookEntryRepository extends JpaRepository<DailyBookEntry, 
     Double sumPaidExpenseBetween(@Param("start") LocalDate start, @Param("end") LocalDate end);
 
     @Query("""
+            select e
+            from DailyBookEntry e
+            where e.entryDate >= :start and e.entryDate < :end
+              and lower(e.entryType) = 'expense'
+              and (e.paymentStatus is null or lower(e.paymentStatus) <> 'udhar')
+            """)
+    List<DailyBookEntry> findPaidExpensesBetween(@Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query("""
             select coalesce(sum(coalesce(e.amount, 0)), 0)
             from DailyBookEntry e
             where e.entryDate >= :start and e.entryDate < :end
