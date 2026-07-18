@@ -24,14 +24,22 @@ function Dashboard() {
   const [products, setProducts] = useState(initialData.products);
   const [dailyBook, setDailyBook] = useState(initialData.dailyBook);
   const [invoices, setInvoices] = useState(initialData.invoices);
+  const [summary, setSummary] = useState(null);
   const [activeBreakdown, setActiveBreakdown] = useState("");
 
   const load = useCallback(async () => {
     const fallback = readDashboardCache();
+    const summaryResult = await Promise.allSettled([
+      apiRequest("/dashboard/summary", { timeoutMs: 8000 })
+    ]);
+    if (summaryResult[0].status === "fulfilled") {
+      setSummary(summaryResult[0].value);
+    }
+
     const results = await Promise.allSettled([
-      apiRequest("/products"),
-      apiRequest("/daily-book/current-month"),
-      apiRequest("/invoices/current-month")
+      apiRequest("/products/options", { timeoutMs: 5000 }),
+      apiRequest("/daily-book/current-month", { timeoutMs: 5000 }),
+      apiRequest("/invoices/recent?limit=20", { timeoutMs: 5000 })
     ]);
     const nextData = {
       products: results[0].status === "fulfilled" && Array.isArray(results[0].value) ? results[0].value : fallback.products,
@@ -60,22 +68,30 @@ function Dashboard() {
     () => calculateReport({ invoices, dailyBook, monthKey: currentMonthKey }),
     [dailyBook, invoices, currentMonthKey]
   );
-  const totals = report.totals;
+  const totals = summary?.totals || report.totals;
 
   const lowStockProducts = products.filter((product) =>
     Number(product.quantity || 0) <= Number(product.minimumStock || 1)
   );
+  const totalProductCount = summary?.totalProducts ?? products.length;
+  const lowStockCount = summary?.lowStockCount ?? lowStockProducts.length;
   const goToLowStock = (product) => {
     const params = new URLSearchParams({ lowStock: "1" });
     if (product?.id) params.set("productId", product.id);
     if (product?.productName) params.set("q", product.productName);
     navigate(`/products?${params.toString()}`);
   };
-  const stockValue = products.reduce((sum, product) => sum + Number(product.quantity || 0) * Number(product.sellPrice || 0), 0);
-  const invoiceTotal = report.invoiceTotal;
-  const washingProfit = report.washingProfit;
-  const grossProfit = report.grossProfit;
-  const netProfit = report.netProfit;
+  const stockValue = summary?.stockValue ?? products.reduce((sum, product) => sum + Number(product.quantity || 0) * Number(product.sellPrice || 0), 0);
+  const invoiceTotal = summary?.invoiceTotal ?? report.invoiceTotal;
+  const washingProfit = summary ? Number(totals.washing || 0) : report.washingProfit;
+  const grossProfit = summary?.grossProfit ?? report.grossProfit;
+  const netProfit = summary?.netProfit ?? report.netProfit;
+  const profitReason = netProfit < 0
+    ? `Paid expense gross profit se ${formatMoney(Math.abs(netProfit))} zyada hai, isliye net profit minus dikh raha hai.`
+    : `Paid expense minus hone ke baad ${formatMoney(netProfit)} net profit bacha hai.`;
+  const collectionNote = totals.udhar > 0
+    ? `${formatMoney(totals.udhar)} customer se lena baaki hai. Bill ka profit count ho chuka hai, ye cash pending hai.`
+    : "Udhar pending nahi hai. Sale ka profit gross profit me count ho chuka hai.";
   const profitBreakdown = [
     { label: "Washing / Labour Profit", note: "Washing, service aur labour income", amount: washingProfit, type: "plus" },
     { label: "Accessories Profit", note: "Selling price minus purchase price", amount: totals.accessoriesProfit, type: "plus" },
@@ -84,12 +100,12 @@ function Dashboard() {
     { label: "Paid Daily Expense", note: "Sirf paid kharch minus hoga, udhar alag rahega", amount: totals.expense, type: "minus" },
     { label: "Net Profit", note: "Gross profit - expense", amount: netProfit, type: "final" }
   ];
-  const goToUdhar = () => navigate("/old-bills?udhar=1");
   const recentInvoices = report.invoices.slice().reverse().slice(0, 6);
   const recentEntries = report.dailyBook.slice().reverse().slice(0, 6);
   const breakdownConfig = getBreakdownConfig(activeBreakdown);
   const breakdownRows = useMemo(() => getDashboardBreakdownRows(activeBreakdown, report, products), [activeBreakdown, products, report]);
   const breakdownDailyTotals = useMemo(() => getDailyTotals(breakdownRows), [breakdownRows]);
+  const unsoldRows = useMemo(() => getUnsoldStockRows(products, report.dailyBook), [products, report.dailyBook]);
   const openBreakdown = (key) => setActiveBreakdown((current) => current === key ? "" : key);
 
   return (
@@ -132,11 +148,72 @@ function Dashboard() {
         <MetricCard label="Net Profit" value={formatMoney(netProfit)} accent="#0f5132" onClick={() => openBreakdown("netProfit")} />
         <MetricCard label="This Month Billing" value={formatMoney(invoiceTotal)} accent="#9c742a" onClick={() => openBreakdown("billing")} />
         <MetricCard label="Stock Value" value={formatMoney(stockValue)} accent="#334155" onClick={() => openBreakdown("stockValue")} />
-        <MetricCard label="Total Products" value={products.length} accent="#475569" onClick={() => navigate("/products")} />
-        <MetricCard label="Low Stock" value={lowStockProducts.length} accent="#c2410c" onClick={() => goToLowStock()} />
-        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={goToUdhar} />
-        <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => openBreakdown("expense")} />
+        <MetricCard label="Total Products" value={totalProductCount} accent="#475569" onClick={() => navigate("/products")} />
+        <MetricCard label="Low Stock" value={lowStockCount} accent="#c2410c" onClick={() => goToLowStock()} />
+        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => openBreakdown("udhar")} />
+        <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => navigate("/daily-book?type=expense")} />
       </div>
+
+      <section className="dashboard-panel dashboard-panel-wide" style={explainPanelStyle}>
+        <div style={panelHeader}>
+          <h2 style={panelTitle}>Profit Samjho</h2>
+          <button type="button" onClick={() => openBreakdown("netProfit")} style={refreshBtn}>Entry Detail</button>
+        </div>
+        <div style={explainGrid}>
+          <div style={explainCard}>
+            <span style={explainLabel}>Gross Profit</span>
+            <strong style={positiveAmount}>{formatMoney(grossProfit)}</strong>
+            <p style={explainText}>Washing profit + accessories profit. Udhar bill ka profit bhi yahi count hota hai.</p>
+          </div>
+          <div style={explainCard}>
+            <span style={explainLabel}>Paid Expense</span>
+            <strong style={negativeAmount}>{formatMoney(totals.expense)}</strong>
+            <p style={explainText}>Jo paid kharch Daily Book me hai, sirf wahi net profit se minus hota hai.</p>
+          </div>
+          <div style={explainCard}>
+            <span style={explainLabel}>Net Profit</span>
+            <strong style={netProfit < 0 ? negativeAmount : positiveAmount}>{formatMoney(netProfit)}</strong>
+            <p style={explainText}>{profitReason}</p>
+          </div>
+          <div style={explainCard}>
+            <span style={explainLabel}>Udhar Pending</span>
+            <strong style={pendingAmount}>{formatMoney(totals.udhar)}</strong>
+            <p style={explainText}>{collectionNote}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="dashboard-panel dashboard-panel-wide" style={widePanelStyle}>
+        <div style={panelHeader}>
+          <h2 style={panelTitle}>Bacha Hua / Check Stock</h2>
+          <button type="button" onClick={() => navigate("/products?lowStock=1")} style={refreshBtn}>Products</button>
+        </div>
+        <div style={tableWrap}>
+          <table style={detailTableStyle}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Item</th>
+                <th style={thStyle}>Qty / Status</th>
+                <th style={thStyle}>Source</th>
+                <th style={thStyle}>Note</th>
+                <th style={thStyle}>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unsoldRows.map((row) => (
+                <tr key={row.id} onClick={() => row.productId ? navigate(`/products?productId=${row.productId}&q=${encodeURIComponent(row.item || "")}`) : navigate(row.target || "/daily-book?type=expense")} style={clickableRow}>
+                  <td style={tdStyle}>{row.item}</td>
+                  <td style={tdStyle}>{row.status}</td>
+                  <td style={tdStyle}>{row.source}</td>
+                  <td style={tdStyle}>{row.note}</td>
+                  <td style={amountTd}>{row.value ? formatMoney(row.value) : "-"}</td>
+                </tr>
+              ))}
+              {unsoldRows.length === 0 && <tr><td style={emptyTd} colSpan="5">No unsold stock found</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {activeBreakdown && (
         <section className="dashboard-panel dashboard-panel-wide" style={widePanelStyle}>
@@ -339,6 +416,7 @@ function getBreakdownConfig(type) {
     netProfit: { title: "Net Profit Breakdown", totalTitle: "Daily Net Profit" },
     billing: { title: "This Month Billing Breakdown", totalTitle: "Daily Billing" },
     stockValue: { title: "Stock Value Breakdown", totalTitle: "Stock By Date" },
+    udhar: { title: "Udhar Pending Breakdown", totalTitle: "Daily Udhar" },
     expense: { title: "Paid Daily Expense Breakdown", totalTitle: "Daily Expense" }
   };
   return configs[type] || { title: "Dashboard Breakdown", totalTitle: "Daily Total" };
@@ -361,6 +439,7 @@ function getDashboardBreakdownRows(type, report, products) {
   }
   if (type === "billing") return getBillingRows(report);
   if (type === "stockValue") return getStockRows(products, true);
+  if (type === "udhar") return getUdharRows(report);
   if (type === "expense") return getExpenseRows(report);
   return [];
 }
@@ -511,9 +590,43 @@ function getExpenseRows(report) {
       source: "Daily Book",
       party: entry.partyName || "-",
       note: entry.note || "Expense",
-      amount: Number(entry.amount || 0)
+      amount: Number(entry.amount || 0),
+      target: `/daily-book?type=expense&entryId=${entry.id}`
     }))
     .sort(sortRowsByDateDesc);
+}
+
+function getUdharRows(report) {
+  const invoiceNumbers = invoiceNumberSet(report);
+  const invoiceRows = (report.invoices || [])
+    .map((invoice) => {
+      const amount = Number(invoice.remainingAmount || 0);
+      if (amount <= 0) return null;
+      return {
+        id: `invoice-udhar-${invoice.id}`,
+        invoiceId: invoice.id,
+        date: formatDate(invoice.invoiceDate || invoice.createdDate),
+        source: `Bill ${invoice.invoiceNumber || invoice.id}`,
+        party: invoice.customer?.customerName || "Walk-in",
+        note: formatInvoiceCategory(invoice),
+        amount
+      };
+    })
+    .filter(Boolean);
+
+  const dailyRows = (report.dailyBook || [])
+    .filter((entry) => entry.paymentStatus === "udhar" && !isInvoiceMirrorEntry(entry, invoiceNumbers))
+    .map((entry) => ({
+      id: `daily-udhar-${entry.id}`,
+      date: formatDate(entry.entryDate || entry.createdDate),
+      source: "Daily Book",
+      party: entry.partyName || "-",
+      note: entry.note || "Udhar",
+      amount: Number(entry.amount || 0),
+      target: `/daily-book?type=udhar&entryId=${entry.id}`
+    }));
+
+  return [...invoiceRows, ...dailyRows].sort(sortRowsByDateDesc);
 }
 
 function getStockRows(products, useValue) {
@@ -528,6 +641,72 @@ function getStockRows(products, useValue) {
       amount: useValue ? Number(product.quantity || 0) * Number(product.sellPrice || 0) : Number(product.quantity || 0)
     }))
     .sort(sortRowsByDateDesc);
+}
+
+function getUnsoldStockRows(products, dailyBook) {
+  const stockRows = (products || [])
+    .filter((product) => Number(product.quantity || 0) > 0)
+    .map((product) => ({
+      id: `stock-${product.id}`,
+      productId: product.id,
+      item: product.productName || "-",
+      status: `Stock qty ${product.quantity || 0}`,
+      source: "Products",
+      note: product.productLocation ? `Location: ${product.productLocation}` : "Tracked stock",
+      value: Number(product.quantity || 0) * Number(product.purchasePrice || 0),
+      date: formatDate(product.updatedDate || product.createdDate)
+    }));
+
+  const productNames = new Set(
+    (products || [])
+      .map((product) => String(product.productName || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const noteRows = (dailyBook || [])
+    .filter((entry) => entry.entryType === "expense")
+    .flatMap((entry) => parseStockLinesFromExpense(entry)
+      .filter((line) => !productNames.has(line.item.toLowerCase()))
+      .map((line, index) => ({
+        id: `expense-stock-${entry.id}-${index}`,
+        item: line.item,
+        status: "Daily expense note me hai, Products stock me add/check karo",
+        source: `Daily Book #${entry.id}`,
+        note: line.raw,
+        value: line.value,
+        date: formatDate(entry.entryDate || entry.createdDate),
+        target: `/daily-book?type=expense&entryId=${entry.id}`
+      })));
+
+  return [...stockRows, ...noteRows]
+    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+    .slice(0, 18);
+}
+
+function parseStockLinesFromExpense(entry) {
+  const note = String(entry.note || "");
+  if (!note) return [];
+  const keywords = /(led|indicator|parking|seat cover|seat|bulb|light|air filter|door visor|ambient|mirror|lock|mud flap)/i;
+  return note
+    .split(/[,|]/)
+    .map((part) => part.trim())
+    .filter((part) => keywords.test(part))
+    .map((part) => {
+      const cleaned = part
+        .replace(/\b\d+\s*(rs|rupees?)\b/ig, "")
+        .replace(/\b\d+\s*pcs?\b/ig, "")
+        .replace(/\b\d+\s*set\b/ig, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const qtyMatch = part.match(/\b(\d+)\s*(pcs?|piece|set)\b/i);
+      const priceMatch = part.match(/\b(\d+)\s*(rs|rupees?)\b/i);
+      return {
+        item: cleaned || part,
+        raw: part,
+        value: priceMatch ? Number(priceMatch[1]) : 0,
+        qty: qtyMatch ? Number(qtyMatch[1]) : null
+      };
+    });
 }
 
 function sortRowsByDateDesc(a, b) {
@@ -567,9 +746,17 @@ const cardValue = { fontSize: "26px", fontWeight: "900", marginTop: "12px" };
 const panelGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "18px" };
 const panelStyle = { background: "rgba(255,255,255,0.96)", borderRadius: "20px", boxShadow: "0 16px 38px rgba(15, 23, 42, 0.08)", overflow: "hidden", border: "1px solid rgba(226,232,240,0.88)" };
 const widePanelStyle = { ...panelStyle, marginBottom: "18px" };
+const explainPanelStyle = { ...widePanelStyle, borderTop: "4px solid #166534" };
 const panelHeader = { padding: "15px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" };
 const panelTitle = { margin: 0, fontSize: "17px", color: "#0f2963" };
 const refreshBtn = { border: "1px solid #0f2963", background: "#ffffff", color: "#0f2963", borderRadius: "5px", padding: "7px 11px", fontWeight: "800", cursor: "pointer" };
+const explainGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", padding: "16px" };
+const explainCard = { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", minHeight: "132px" };
+const explainLabel = { display: "block", color: "#64748b", fontSize: "12px", fontWeight: "900", textTransform: "uppercase", marginBottom: "9px" };
+const explainText = { margin: "10px 0 0", color: "#475569", fontSize: "13px", lineHeight: 1.45 };
+const positiveAmount = { color: "#166534", fontSize: "24px", fontWeight: "900" };
+const negativeAmount = { color: "#b91c1c", fontSize: "24px", fontWeight: "900" };
+const pendingAmount = { color: "#9c742a", fontSize: "24px", fontWeight: "900" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
 const tableWrap = { overflowX: "auto" };
 const detailTableStyle = { ...tableStyle, minWidth: "760px" };

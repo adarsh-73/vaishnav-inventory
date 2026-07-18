@@ -33,4 +33,16 @@ public interface ProductRepository extends JpaRepository<product, Long> {
 
     @Query("SELECT p FROM product p WHERE p.quantity <= p.minimumStock")
 List<product> findLowStockProducts();
+
+    @Query("select coalesce(sum(coalesce(p.quantity, 0) * coalesce(p.sellPrice, 0)), 0) from product p")
+    Double sumStockSaleValue();
+
+    @Query("select coalesce(sum(coalesce(p.quantity, 0) * coalesce(p.purchasePrice, 0)), 0) from product p")
+    Double sumStockCostValue();
+
+    @Query("select count(p) from product p where coalesce(p.quantity, 0) > 0")
+    Long countProductsInStock();
+
+    @Query("select count(p) from product p where coalesce(p.quantity, 0) <= coalesce(p.minimumStock, 1)")
+    Long countLowStockProducts();
 }

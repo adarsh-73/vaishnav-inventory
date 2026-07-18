@@ -9,13 +9,18 @@ function resolveApiBase() {
 export const API_BASE = resolveApiBase();
 
 export async function apiRequest(path, options = {}) {
+  const { timeoutMs = 12000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
   const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOptions,
+    signal: fetchOptions.signal || controller.signal,
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {})
+      ...(fetchOptions.headers || {})
     }
-  });
+  }).finally(() => window.clearTimeout(timeoutId));
 
   if (!response.ok) {
     const message = await response.text();

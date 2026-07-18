@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/products")
@@ -25,6 +26,25 @@ public class ProductController {
     @GetMapping
     public List<product> getAllProducts() {
         return productService.getAllProducts();
+    }
+
+    @GetMapping("/options")
+    public List<Map<String, Object>> getProductOptions() {
+        return productService.getAllProducts().stream()
+                .map(productData -> {
+                    Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("id", productData.getId());
+                    row.put("productName", productData.getProductName());
+                    row.put("quantity", productData.getQuantity());
+                    row.put("minimumStock", productData.getMinimumStock());
+                    row.put("purchasePrice", productData.getPurchasePrice());
+                    row.put("sellPrice", productData.getSellPrice());
+                    row.put("productLocation", productData.getProductLocation());
+                    row.put("createdDate", productData.getCreatedDate());
+                    row.put("updatedDate", productData.getUpdatedDate());
+                    return row;
+                })
+                .toList();
     }
 
     // Get Product By Id
