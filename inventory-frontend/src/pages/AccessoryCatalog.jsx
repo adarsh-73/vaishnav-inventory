@@ -356,9 +356,9 @@ function AccessoryCatalog() {
           <div className="catalog-empty">
             <FiBox />
             <h2>Catalog abhi khali hai</h2>
-            <p>Ye page sirf saved/imported items dikhata hai. Kisi bhi gaadi aur item ka market price dekhne ke liye Live Price Search kholo.</p>
-            <button className="catalog-button primary" onClick={() => navigate("/price-enquiry")}>
-              <FiSearch /> Live Price Search
+            <p>Ye page sirf saved/imported items dikhata hai. Product stock aur sale price manage karne ke liye Products kholo.</p>
+            <button className="catalog-button primary" onClick={() => navigate("/products")}>
+              <FiSearch /> Products
             </button>
           </div>
         ) : (

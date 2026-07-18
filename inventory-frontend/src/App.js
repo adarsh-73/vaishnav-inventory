@@ -12,7 +12,6 @@ const DailyBook = lazy(() => import("./pages/DailyBook"));
 const Attendance = lazy(() => import("./pages/Attendance"));
 const OldBills = lazy(() => import("./pages/OldBills"));
 const MonthlyStatement = lazy(() => import("./pages/MonthlyStatement"));
-const CryptoTrading = lazy(() => import("./pages/CryptoTrading"));
 
 const APP_PASSWORD = process.env.REACT_APP_APP_PASSWORD || "vaishnav";
 
@@ -52,12 +51,10 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/products" element={<Products />} />
               <Route path="/accessories-catalog" element={<Navigate to="/" replace />} />
-              <Route path="/price-enquiry" element={<Navigate to="/" replace />} />
               <Route path="/purchase" element={<Purchase />} />
               <Route path="/billing" element={<BillingPage />} />
               <Route path="/old-bills" element={<OldBills />} />
               <Route path="/monthly-statement" element={<MonthlyStatement />} />
-              <Route path="/crypto-trading" element={<CryptoTrading />} />
               <Route path="/quotation" element={<Quotation />} />
               <Route path="/selling-item" element={<SellingItem />} />
               <Route path="/daily-book" element={<DailyBook />} />

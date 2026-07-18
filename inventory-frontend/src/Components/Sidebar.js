@@ -9,8 +9,7 @@ const navItems = [
   { to: "/purchase", icon: "S", label: "Purchase", preload: () => import("../pages/Purchase") },
   { to: "/monthly-statement", icon: "M", label: "Statement", preload: () => import("../pages/MonthlyStatement") },
   { to: "/quotation", icon: "Q", label: "Quotation", preload: () => import("../pages/Quotation") },
-  { to: "/attendance", icon: "A", label: "Attendance", preload: () => import("../pages/Attendance") },
-  { to: "/crypto-trading", icon: "C", label: "Crypto", preload: () => import("../pages/CryptoTrading") }
+  { to: "/attendance", icon: "A", label: "Attendance", preload: () => import("../pages/Attendance") }
 ];
 
 function Sidebar() {
