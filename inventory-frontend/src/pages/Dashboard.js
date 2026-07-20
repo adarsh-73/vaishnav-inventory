@@ -108,7 +108,12 @@ function Dashboard() {
   const breakdownRows = useMemo(() => getDashboardBreakdownRows(activeBreakdown, report, products), [activeBreakdown, products, report]);
   const breakdownDailyTotals = useMemo(() => getDailyTotals(breakdownRows), [breakdownRows]);
   const unsoldRows = useMemo(() => getUnsoldStockRows(products, report.dailyBook, report.invoices), [products, report.dailyBook, report.invoices]);
-  const openBreakdown = (key) => setActiveBreakdown((current) => current === key ? "" : key);
+  const openBreakdown = (key) => {
+    setActiveBreakdown((current) => current === key ? "" : key);
+    window.setTimeout(() => {
+      document.getElementById("dashboard-breakdown")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
 
   return (
     <div className="dashboard-page" style={pageStyle}>
@@ -152,7 +157,7 @@ function Dashboard() {
         <MetricCard label="Stock Value" value={formatMoney(stockValue)} accent="#334155" onClick={() => openBreakdown("stockValue")} />
         <MetricCard label="Total Products" value={totalProductCount} accent="#475569" onClick={() => navigate("/products")} />
         <MetricCard label="Low Stock" value={lowStockCount} accent="#c2410c" onClick={() => goToLowStock()} />
-        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => navigate("/daily-book?type=udhar")} />
+        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => openBreakdown("udhar")} />
         <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => navigate("/daily-book?type=expense")} />
         <MetricCard label="Stock Purchase" value={formatMoney(stockPurchaseExpense)} accent="#6d4c1d" onClick={() => openBreakdown("stockPurchase")} />
       </div>
@@ -219,7 +224,7 @@ function Dashboard() {
       </section>
 
       {activeBreakdown && (
-        <section className="dashboard-panel dashboard-panel-wide" style={widePanelStyle}>
+        <section id="dashboard-breakdown" className="dashboard-panel dashboard-panel-wide" style={widePanelStyle}>
           <div style={panelHeader}>
             <h2 style={panelTitle}>{breakdownConfig.title}</h2>
             <button type="button" onClick={() => setActiveBreakdown("")} style={refreshBtn}>Close</button>
