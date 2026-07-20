@@ -152,7 +152,7 @@ function Dashboard() {
         <MetricCard label="Stock Value" value={formatMoney(stockValue)} accent="#334155" onClick={() => openBreakdown("stockValue")} />
         <MetricCard label="Total Products" value={totalProductCount} accent="#475569" onClick={() => navigate("/products")} />
         <MetricCard label="Low Stock" value={lowStockCount} accent="#c2410c" onClick={() => goToLowStock()} />
-        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => openBreakdown("udhar")} />
+        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => navigate("/daily-book?type=udhar")} />
         <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => navigate("/daily-book?type=expense")} />
         <MetricCard label="Stock Purchase" value={formatMoney(stockPurchaseExpense)} accent="#6d4c1d" onClick={() => openBreakdown("stockPurchase")} />
       </div>
