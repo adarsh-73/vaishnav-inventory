@@ -56,8 +56,8 @@ public class DashboardController {
                 .filter(entry -> !isStockPurchaseExpense(entry))
                 .mapToDouble(entry -> value(entry.getAmount()))
                 .sum();
-        double udhar = value(invoiceRepository.sumRemainingBetween(start, end))
-                + value(dailyBookEntryRepository.sumManualUdharBetween(monthStart, monthEnd));
+        double udhar = value(invoiceRepository.sumRemainingAll())
+                + value(dailyBookEntryRepository.sumManualUdharAll());
         double invoiceTotal = value(invoiceRepository.sumTotalBetween(start, end));
         double grossProfit = washingProfit + accessoriesProfit;
         double netProfit = grossProfit - paidExpense;
