@@ -42,5 +42,14 @@ public interface DailyBookEntryRepository extends JpaRepository<DailyBookEntry, 
               and (e.note is null or lower(e.note) not like '%invoice%')
             """)
     Double sumManualUdharBetween(@Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query("""
+            select coalesce(sum(coalesce(e.amount, 0)), 0)
+            from DailyBookEntry e
+            where lower(e.paymentStatus) = 'udhar'
+              and (e.note is null or lower(e.note) not like '%invoice%')
+            """)
+    Double sumManualUdharAll();
+
     int deleteByNoteContainingIgnoreCase(String note);
 }
