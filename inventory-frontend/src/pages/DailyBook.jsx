@@ -13,9 +13,9 @@ function DailyBook() {
   const activeBucket = searchParams.get("bucket") || "";
   const selectedEntryId = searchParams.get("entryId") || "";
 
-  const loadEntries = async () => {
+  const loadEntries = async (loadAll = false) => {
     try {
-      const data = await apiRequest("/daily-book/current-month");
+      const data = await apiRequest(loadAll ? "/daily-book" : "/daily-book/current-month");
       setEntries(Array.isArray(data) ? data : []);
     } catch {
       const data = await apiRequest("/daily-book");
@@ -24,8 +24,8 @@ function DailyBook() {
   };
 
   useEffect(() => {
-    loadEntries();
-  }, []);
+    loadEntries(activeType === "udhar");
+  }, [activeType]);
 
   useEffect(() => {
     if (!entries.length) return;
@@ -119,11 +119,25 @@ function DailyBook() {
   };
 
   const markPaid = async (entry) => {
+    const invoiceNumber = String(entry.note || "").match(/V-\d+/i)?.[0];
+    if (invoiceNumber) {
+      try {
+        const invoices = await apiRequest("/invoices", { timeoutMs: 12000 });
+        const invoice = (Array.isArray(invoices) ? invoices : []).find((item) =>
+          String(item.invoiceNumber || "").toLowerCase() === invoiceNumber.toLowerCase()
+        );
+        if (invoice?.id) {
+          await apiRequest(`/invoices/${invoice.id}/mark-paid`, { method: "PUT" });
+        }
+      } catch {
+        // Daily book row still gets marked paid below, even if the invoice lookup fails.
+      }
+    }
     await apiRequest(`/daily-book/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({ ...entry, paymentStatus: "paid", note: `${entry.note || ""} (Udhar paid)` })
     });
-    loadEntries();
+    loadEntries(activeType === "udhar");
   };
 
   return (
