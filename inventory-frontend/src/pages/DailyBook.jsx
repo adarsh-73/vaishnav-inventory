@@ -2,18 +2,25 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { todayDate } from "../utils/storage";
 import { apiRequest, isWashingEntry } from "../utils/api";
+import { isStockPurchaseExpense } from "../utils/reporting";
 
 function DailyBook() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [entries, setEntries] = useState([]);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ entryDate: todayDate(), entryType: "expense", incomeCategory: "accessories", partyName: "", note: "", amount: "", paymentStatus: "paid" });
+  const [form, setForm] = useState({ entryDate: todayDate(), entryType: "expense", incomeCategory: "service", partyName: "", note: "", amount: "", paymentStatus: "paid" });
   const activeType = searchParams.get("type") || "";
+  const activeBucket = searchParams.get("bucket") || "";
   const selectedEntryId = searchParams.get("entryId") || "";
 
   const loadEntries = async () => {
-    const data = await apiRequest("/daily-book");
-    setEntries(Array.isArray(data) ? data : []);
+    try {
+      const data = await apiRequest("/daily-book/current-month");
+      setEntries(Array.isArray(data) ? data : []);
+    } catch {
+      const data = await apiRequest("/daily-book");
+      setEntries(Array.isArray(data) ? data : []);
+    }
   };
 
   useEffect(() => {
@@ -33,38 +40,53 @@ function DailyBook() {
   const totals = useMemo(() => entries.reduce((sum, entry) => {
     if (entry.entryType === "income" && isWashingEntry(entry)) sum.washing += Number(entry.amount || 0);
     if (entry.entryType === "income" && !isWashingEntry(entry)) sum.accessories += Number(entry.amount || 0);
-    if (entry.entryType === "expense") sum.expense += Number(entry.amount || 0);
+    if (entry.entryType === "expense") {
+      if (isStockPurchaseExpense(entry)) sum.stockPurchase += Number(entry.amount || 0);
+      else sum.expense += Number(entry.amount || 0);
+    }
     if (entry.paymentStatus === "udhar") sum.udhar += Number(entry.amount || 0);
     return sum;
-  }, { washing: 0, accessories: 0, expense: 0, udhar: 0 }), [entries]);
+  }, { washing: 0, accessories: 0, expense: 0, stockPurchase: 0, udhar: 0 }), [entries]);
 
   const visibleEntries = useMemo(() => {
-    if (activeType === "expense") return entries.filter((entry) => entry.entryType === "expense");
+    if (activeType === "expense") {
+      if (activeBucket === "stock-purchase") return entries.filter((entry) => entry.entryType === "expense" && isStockPurchaseExpense(entry));
+      return entries.filter((entry) => entry.entryType === "expense" && !isStockPurchaseExpense(entry));
+    }
     if (activeType === "washing") return entries.filter((entry) => entry.entryType === "income" && isWashingEntry(entry));
     if (activeType === "accessories") return entries.filter((entry) => entry.entryType === "income" && !isWashingEntry(entry));
     if (activeType === "income") return entries.filter((entry) => entry.entryType === "income");
     if (activeType === "udhar") return entries.filter((entry) => entry.paymentStatus === "udhar");
     return entries;
-  }, [activeType, entries]);
+  }, [activeBucket, activeType, entries]);
 
-  const showEntries = (type) => {
-    setSearchParams({ type });
+  const visibleTotal = useMemo(() => (
+    visibleEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+  ), [visibleEntries]);
+
+  const showEntries = (type, bucket = "") => {
+    const params = {};
+    if (type) params.type = type;
+    if (bucket) params.bucket = bucket;
+    setSearchParams(params);
     window.setTimeout(() => {
       document.getElementById("daily-book-entries")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 60);
   };
 
-  const activeLabel = {
-    washing: "Washing income entries",
-    accessories: "Accessories income entries",
-    expense: "Expense entries",
-    udhar: "Udhar entries",
-    income: "Income entries"
-  }[activeType];
+  const activeLabel = getActiveLabel(activeType, activeBucket);
 
   const resetForm = () => {
     setEditingId(null);
-    setForm({ entryDate: todayDate(), entryType: "expense", incomeCategory: "accessories", partyName: "", note: "", amount: "", paymentStatus: "paid" });
+    setForm({ entryDate: todayDate(), entryType: "expense", incomeCategory: "service", partyName: "", note: "", amount: "", paymentStatus: "paid" });
+  };
+
+  const handleEntryTypeChange = (entryType) => {
+    setForm({
+      ...form,
+      entryType,
+      incomeCategory: entryType === "expense" ? "service" : "accessories"
+    });
   };
 
   const handleSubmit = async (event) => {
@@ -88,7 +110,7 @@ function DailyBook() {
     setForm({
       entryDate: entry.entryDate || todayDate(),
       entryType: entry.entryType || "expense",
-      incomeCategory: entry.incomeCategory || "accessories",
+      incomeCategory: entry.incomeCategory || "service",
       partyName: entry.partyName || "",
       note: entry.note || "",
       amount: entry.amount ?? "",
@@ -110,18 +132,31 @@ function DailyBook() {
       <div style={summaryRow}>
         <button type="button" onClick={() => showEntries("washing")} style={summaryButtonCard("#0f766e", activeType === "washing")}><span>Washing Income</span><strong>Rs. {totals.washing}</strong></button>
         <button type="button" onClick={() => showEntries("accessories")} style={summaryButtonCard("#0f2963", activeType === "accessories")}><span>Accessories Income</span><strong>Rs. {totals.accessories}</strong></button>
-        <button type="button" onClick={() => showEntries("expense")} style={summaryButtonCard("#7f1d1d", activeType === "expense")}><span>Expense</span><strong>Rs. {totals.expense}</strong></button>
+        <button type="button" onClick={() => showEntries("expense", "shop-expense")} style={summaryButtonCard("#7f1d1d", activeType === "expense" && activeBucket !== "stock-purchase")}><span>Daily Expense</span><strong>Rs. {totals.expense}</strong></button>
+        <button type="button" onClick={() => showEntries("expense", "stock-purchase")} style={summaryButtonCard("#6d4c1d", activeBucket === "stock-purchase")}><span>Parts / Stock</span><strong>Rs. {totals.stockPurchase}</strong></button>
         <button type="button" onClick={() => showEntries("udhar")} style={summaryButtonCard("#b91c1c", activeType === "udhar")}><span>Udhar Pending</span><strong>Rs. {totals.udhar}</strong></button>
       </div>
       <form onSubmit={handleSubmit} style={panelStyle}>
         <input type="date" value={form.entryDate} onChange={(e) => setForm({ ...form, entryDate: e.target.value })} style={inputStyle} />
-        <select value={form.entryType} onChange={(e) => setForm({ ...form, entryType: e.target.value })} style={inputStyle}>
+        <select value={form.entryType} onChange={(e) => handleEntryTypeChange(e.target.value)} style={inputStyle}>
           <option value="expense">Kharch</option>
           <option value="income">Income</option>
         </select>
         <select value={form.incomeCategory} onChange={(e) => setForm({ ...form, incomeCategory: e.target.value })} style={inputStyle}>
-          <option value="accessories">Accessories</option>
-          <option value="washing">Washing</option>
+          {form.entryType === "expense" ? (
+            <>
+              <option value="service">Service / Labour Expense</option>
+              <option value="parts">Parts / Stock Purchase</option>
+              <option value="rent">Rent / Utility</option>
+              <option value="salary">Salary</option>
+              <option value="other">Other Shop Expense</option>
+            </>
+          ) : (
+            <>
+              <option value="accessories">Accessories</option>
+              <option value="washing">Washing</option>
+            </>
+          )}
         </select>
         <select value={form.paymentStatus} onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })} style={inputStyle}>
           <option value="paid">Paid</option>
@@ -136,7 +171,10 @@ function DailyBook() {
       <div id="daily-book-entries" style={panelStyle}>
         {activeType && (
           <div style={filterBar}>
-            <strong>{activeLabel}</strong>
+            <div>
+              <strong>{activeLabel}</strong>
+              <div style={shownTotalStyle}>Shown total: Rs. {visibleTotal.toLocaleString("en-IN")}</div>
+            </div>
             <button type="button" onClick={() => setSearchParams({})} style={secondaryBtn}>Show All</button>
           </div>
         )}
@@ -158,6 +196,16 @@ function DailyBook() {
   );
 }
 
+function getActiveLabel(type, bucket) {
+  if (type === "expense" && bucket === "stock-purchase") return "Parts / stock purchase entries";
+  if (type === "expense") return "Daily expense entries";
+  if (type === "washing") return "Washing income entries";
+  if (type === "accessories") return "Accessories income entries";
+  if (type === "udhar") return "Udhar entries";
+  if (type === "income") return "Income entries";
+  return "Entries";
+}
+
 const pageStyle = { padding: "30px", background: "#f1f5f9", minHeight: "100vh" };
 const titleStyle = { margin: "0 0 20px", color: "#0f172a" };
 const summaryRow = { display: "flex", gap: "15px", flexWrap: "wrap", marginBottom: "18px" };
@@ -173,6 +221,7 @@ const summaryButtonCard = (accent, active) => ({
 });
 const panelStyle = { background: "white", padding: "18px", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.08)", marginBottom: "18px", overflowX: "auto" };
 const filterBar = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "12px", color: "#7f1d1d" };
+const shownTotalStyle = { marginTop: "4px", color: "#7f1d1d", fontSize: "13px", fontWeight: "800" };
 const inputStyle = { padding: "11px", marginRight: "10px", marginBottom: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", minWidth: "160px" };
 const primaryBtn = { padding: "11px 18px", background: "#0f2963", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
 const secondaryBtn = { padding: "8px 10px", background: "#ffffff", color: "#0f2963", border: "1px solid #0f2963", borderRadius: "5px", cursor: "pointer", marginRight: "6px" };
