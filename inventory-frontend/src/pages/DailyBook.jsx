@@ -7,6 +7,7 @@ import { isStockPurchaseExpense } from "../utils/reporting";
 function DailyBook() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [entries, setEntries] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ entryDate: todayDate(), entryType: "expense", incomeCategory: "service", partyName: "", note: "", amount: "", paymentStatus: "paid" });
   const activeType = searchParams.get("type") || "";
@@ -15,11 +16,19 @@ function DailyBook() {
 
   const loadEntries = async (loadAll = false) => {
     try {
-      const data = await apiRequest(loadAll ? "/daily-book" : "/daily-book/current-month");
-      setEntries(Array.isArray(data) ? data : []);
+      const [dailyData, invoiceData] = await Promise.all([
+        apiRequest(loadAll ? "/daily-book" : "/daily-book/current-month"),
+        apiRequest("/invoices", { timeoutMs: 12000 }).catch(() => [])
+      ]);
+      setEntries(Array.isArray(dailyData) ? dailyData : []);
+      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
     } catch {
-      const data = await apiRequest("/daily-book");
-      setEntries(Array.isArray(data) ? data : []);
+      const [dailyData, invoiceData] = await Promise.all([
+        apiRequest("/daily-book"),
+        apiRequest("/invoices", { timeoutMs: 12000 }).catch(() => [])
+      ]);
+      setEntries(Array.isArray(dailyData) ? dailyData : []);
+      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
     }
   };
 
@@ -37,7 +46,22 @@ function DailyBook() {
     }, 60);
   }, [activeType, entries.length, selectedEntryId]);
 
-  const totals = useMemo(() => entries.reduce((sum, entry) => {
+  const invoiceNumbers = useMemo(() => new Set(
+    invoices
+      .map((invoice) => invoice.invoiceNumber)
+      .filter(Boolean)
+      .map((invoiceNumber) => String(invoiceNumber).trim().toLowerCase())
+  ), [invoices]);
+
+  const invoiceUdharTotal = useMemo(() => invoices.reduce((sum, invoice) => (
+    sum + Number(invoice.remainingAmount || 0)
+  ), 0), [invoices]);
+
+  const accountEntries = useMemo(() => entries.filter((entry) => (
+    !(entry.paymentStatus === "udhar" && isInvoiceMirrorEntry(entry, invoiceNumbers))
+  )), [entries, invoiceNumbers]);
+
+  const totals = useMemo(() => accountEntries.reduce((sum, entry) => {
     if (entry.entryType === "income" && isWashingEntry(entry)) sum.washing += Number(entry.amount || 0);
     if (entry.entryType === "income" && !isWashingEntry(entry)) sum.accessories += Number(entry.amount || 0);
     if (entry.entryType === "expense") {
@@ -46,23 +70,25 @@ function DailyBook() {
     }
     if (entry.paymentStatus === "udhar") sum.udhar += Number(entry.amount || 0);
     return sum;
-  }, { washing: 0, accessories: 0, expense: 0, stockPurchase: 0, udhar: 0 }), [entries]);
+  }, { washing: 0, accessories: 0, expense: 0, stockPurchase: 0, udhar: invoiceUdharTotal }), [accountEntries, invoiceUdharTotal]);
 
   const visibleEntries = useMemo(() => {
+    const rows = activeType === "udhar" ? entries : accountEntries;
     if (activeType === "expense") {
-      if (activeBucket === "stock-purchase") return entries.filter((entry) => entry.entryType === "expense" && isStockPurchaseExpense(entry));
-      return entries.filter((entry) => entry.entryType === "expense" && !isStockPurchaseExpense(entry));
+      if (activeBucket === "stock-purchase") return rows.filter((entry) => entry.entryType === "expense" && isStockPurchaseExpense(entry));
+      return rows.filter((entry) => entry.entryType === "expense" && !isStockPurchaseExpense(entry));
     }
-    if (activeType === "washing") return entries.filter((entry) => entry.entryType === "income" && isWashingEntry(entry));
-    if (activeType === "accessories") return entries.filter((entry) => entry.entryType === "income" && !isWashingEntry(entry));
-    if (activeType === "income") return entries.filter((entry) => entry.entryType === "income");
-    if (activeType === "udhar") return entries.filter((entry) => entry.paymentStatus === "udhar");
-    return entries;
-  }, [activeBucket, activeType, entries]);
+    if (activeType === "washing") return rows.filter((entry) => entry.entryType === "income" && isWashingEntry(entry));
+    if (activeType === "accessories") return rows.filter((entry) => entry.entryType === "income" && !isWashingEntry(entry));
+    if (activeType === "income") return rows.filter((entry) => entry.entryType === "income");
+    if (activeType === "udhar") return rows.filter((entry) => entry.paymentStatus === "udhar");
+    return rows;
+  }, [accountEntries, activeBucket, activeType, entries]);
 
-  const visibleTotal = useMemo(() => (
-    visibleEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
-  ), [visibleEntries]);
+  const visibleTotal = useMemo(() => {
+    if (activeType === "udhar") return totals.udhar;
+    return visibleEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  }, [activeType, totals.udhar, visibleEntries]);
 
   const showEntries = (type, bucket = "") => {
     const params = {};
@@ -122,8 +148,7 @@ function DailyBook() {
     const invoiceNumber = String(entry.note || "").match(/V-\d+/i)?.[0];
     if (invoiceNumber) {
       try {
-        const invoices = await apiRequest("/invoices", { timeoutMs: 12000 });
-        const invoice = (Array.isArray(invoices) ? invoices : []).find((item) =>
+        const invoice = invoices.find((item) =>
           String(item.invoiceNumber || "").toLowerCase() === invoiceNumber.toLowerCase()
         );
         if (invoice?.id) {
@@ -194,12 +219,16 @@ function DailyBook() {
         )}
         <table style={tableStyle}>
           <thead><tr><th style={thStyle}>Date</th><th style={thStyle}>Type</th><th style={thStyle}>Category</th><th style={thStyle}>Party</th><th style={thStyle}>Note</th><th style={thStyle}>Amount</th><th style={thStyle}>Action</th></tr></thead>
-          <tbody>{visibleEntries.map((entry) => (
+          <tbody>{visibleEntries.map((entry) => {
+            const billLinked = entry.paymentStatus === "udhar" && isInvoiceMirrorEntry(entry, invoiceNumbers);
+            const noteText = billLinked ? `${entry.note || "-"} | Bill se linked hai, total invoice se count hoga.` : entry.note;
+            return (
             <tr key={entry.id} id={`daily-entry-${entry.id}`} style={String(entry.id) === selectedEntryId ? selectedRowStyle : undefined}>
-              <td style={tdStyle}>{entry.entryDate}</td><td style={tdStyle}>{entry.entryType}</td><td style={tdStyle}>{entry.incomeCategory || "-"}</td><td style={tdStyle}>{entry.partyName}</td><td style={tdStyle}>{entry.note}</td><td style={tdStyle}>Rs. {entry.amount}</td>
-              <td style={tdStyle}><button onClick={() => editEntry(entry)} style={secondaryBtn}>Edit</button>{entry.paymentStatus === "udhar" && <button onClick={() => markPaid(entry)} style={smallBtn}>Mark Paid</button>}</td>
+              <td style={tdStyle}>{entry.entryDate}</td><td style={tdStyle}>{entry.entryType}</td><td style={tdStyle}>{entry.incomeCategory || "-"}</td><td style={tdStyle}>{entry.partyName}</td><td style={tdStyle}>{noteText}</td><td style={tdStyle}>Rs. {entry.amount}</td>
+              <td style={tdStyle}><button onClick={() => editEntry(entry)} style={secondaryBtn}>Edit</button>{entry.paymentStatus === "udhar" && !billLinked && <button onClick={() => markPaid(entry)} style={smallBtn}>Mark Paid</button>}</td>
             </tr>
-          ))}
+            );
+          })}
           {visibleEntries.length === 0 && (
             <tr><td style={emptyTd} colSpan="7">No entries</td></tr>
           )}
@@ -208,6 +237,13 @@ function DailyBook() {
       </div>
     </div>
   );
+}
+
+function isInvoiceMirrorEntry(entry, invoiceNumbers) {
+  const note = String(entry.note || "").toLowerCase();
+  if (!note.includes("invoice ")) return false;
+  if (!invoiceNumbers.size) return /v-\d+/i.test(note);
+  return Array.from(invoiceNumbers).some((invoiceNumber) => note.includes(invoiceNumber));
 }
 
 function getActiveLabel(type, bucket) {
