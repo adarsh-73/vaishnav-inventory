@@ -58,6 +58,11 @@ public class InvoiceController {
                 .findByInvoiceDateGreaterThanEqualAndInvoiceDateLessThanOrderByInvoiceDateDesc(start, end);
     }
 
+    @GetMapping("/pending-udhar")
+    public List<Invoice> getPendingUdharInvoices() {
+        return invoiceRepository.findPendingUdharBills();
+    }
+
     @GetMapping("/{id}")
     public Invoice getInvoice(@PathVariable Long id) {
         return invoiceRepository.findById(id)

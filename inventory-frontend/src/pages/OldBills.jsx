@@ -26,8 +26,9 @@ function OldBills() {
   const loadInvoices = useCallback(async () => {
     setLoading(true);
     try {
+      const invoicePath = isUdharMode ? "/invoices/pending-udhar" : "/invoices";
       const [invoiceResponse, dailyBookResponse] = await Promise.all([
-        fetch(`${API_BASE}/invoices`),
+        fetch(`${API_BASE}${invoicePath}`),
         fetch(`${API_BASE}/daily-book`)
       ]);
       if (!invoiceResponse.ok) throw new Error("Bills load nahi hue");
@@ -47,7 +48,7 @@ function OldBills() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isUdharMode]);
 
   useEffect(() => {
     loadInvoices();
@@ -56,7 +57,7 @@ function OldBills() {
   useEffect(() => {
     const qParam = searchParams.get("q");
     const searchByParam = searchParams.get("searchBy");
-    if (qParam !== null) setQuery(qParam);
+    setQuery(qParam || "");
     if (searchByParam) setSearchBy(searchByParam);
   }, [searchParams]);
 
