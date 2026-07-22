@@ -10,5 +10,6 @@ FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 ENV PORT=8080
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=55 -XX:InitialRAMPercentage=20 -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -Xss256k -Dspring.backgroundpreinitializer.ignore=true"
 EXPOSE 8080
 CMD ["java", "-jar", "app.jar"]

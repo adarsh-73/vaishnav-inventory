@@ -48,7 +48,7 @@ public class PurchaseService {
 
         DailyBookEntry entry = new DailyBookEntry();
         entry.setEntryType("expense");
-        entry.setIncomeCategory("purchase");
+        entry.setIncomeCategory("parts");
         entry.setPartyName("Purchase");
         entry.setNote(productData.getProductName() + " purchase - Qty " + purchase.getQuantity());
         entry.setAmount((purchase.getPurchasePrice() == null ? 0 : purchase.getPurchasePrice()) * purchase.getQuantity());

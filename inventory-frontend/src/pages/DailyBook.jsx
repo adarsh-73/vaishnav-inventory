@@ -171,8 +171,8 @@ function DailyBook() {
       <div style={summaryRow}>
         <button type="button" onClick={() => showEntries("washing")} style={summaryButtonCard("#0f766e", activeType === "washing")}><span>Washing Income</span><strong>Rs. {totals.washing}</strong></button>
         <button type="button" onClick={() => showEntries("accessories")} style={summaryButtonCard("#0f2963", activeType === "accessories")}><span>Accessories Income</span><strong>Rs. {totals.accessories}</strong></button>
-        <button type="button" onClick={() => showEntries("expense", "shop-expense")} style={summaryButtonCard("#7f1d1d", activeType === "expense" && activeBucket !== "stock-purchase")}><span>Daily Expense</span><strong>Rs. {totals.expense}</strong></button>
-        <button type="button" onClick={() => showEntries("expense", "stock-purchase")} style={summaryButtonCard("#6d4c1d", activeBucket === "stock-purchase")}><span>Parts / Stock</span><strong>Rs. {totals.stockPurchase}</strong></button>
+        <button type="button" onClick={() => showEntries("expense", "shop-expense")} style={summaryButtonCard("#7f1d1d", activeType === "expense" && activeBucket !== "stock-purchase")}><span>Labour / Shop Expense</span><strong>Rs. {totals.expense}</strong></button>
+        <button type="button" onClick={() => showEntries("expense", "stock-purchase")} style={summaryButtonCard("#6d4c1d", activeBucket === "stock-purchase")}><span>Parts / Stock Purchase</span><strong>Rs. {totals.stockPurchase}</strong></button>
         <button type="button" onClick={() => showEntries("udhar")} style={summaryButtonCard("#b91c1c", activeType === "udhar")}><span>Udhar Pending</span><strong>Rs. {totals.udhar}</strong></button>
       </div>
       <form onSubmit={handleSubmit} style={panelStyle}>
@@ -248,7 +248,7 @@ function isInvoiceMirrorEntry(entry, invoiceNumbers) {
 
 function getActiveLabel(type, bucket) {
   if (type === "expense" && bucket === "stock-purchase") return "Parts / stock purchase entries";
-  if (type === "expense") return "Daily expense entries";
+  if (type === "expense") return "Labour / shop expense entries";
   if (type === "washing") return "Washing income entries";
   if (type === "accessories") return "Accessories income entries";
   if (type === "udhar") return "Udhar entries";

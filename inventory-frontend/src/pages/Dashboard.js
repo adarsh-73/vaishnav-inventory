@@ -87,21 +87,6 @@ function Dashboard() {
   const stockPurchaseExpense = Number(totals.stockPurchaseExpense || 0);
   const grossProfit = summary?.grossProfit ?? report.grossProfit;
   const netProfit = summary?.netProfit ?? report.netProfit;
-  const profitReason = netProfit < 0
-    ? `Paid expense gross profit se ${formatMoney(Math.abs(netProfit))} zyada hai, isliye net profit minus dikh raha hai.`
-    : `Paid expense minus hone ke baad ${formatMoney(netProfit)} net profit bacha hai.`;
-  const collectionNote = totals.udhar > 0
-    ? `${formatMoney(totals.udhar)} customer se lena baaki hai. Bill ka profit count ho chuka hai, ye cash pending hai.`
-    : "Udhar pending nahi hai. Sale ka profit gross profit me count ho chuka hai.";
-  const profitBreakdown = [
-    { label: "Washing / Labour Profit", note: "Washing, service aur labour income", amount: washingProfit, type: "plus" },
-    { label: "Accessories Profit", note: "Selling price minus purchase price", amount: totals.accessoriesProfit, type: "plus" },
-    { label: "Old Accessories Earning", note: "Purane saman ki direct earning", amount: totals.oldAccessoriesProfit, type: "plus" },
-    { label: "Gross Profit", note: "Washing + accessories profit", amount: grossProfit, type: "total" },
-    { label: "Paid Daily Expense", note: "Sirf operating kharch minus hoga, stock purchase alag rahega", amount: totals.expense, type: "minus" },
-    { label: "Stock Purchase", note: "Resale saman, bill profit me cost already count hoti hai", amount: stockPurchaseExpense, type: "total" },
-    { label: "Net Profit", note: "Gross profit - expense", amount: netProfit, type: "final" }
-  ];
   const recentInvoices = report.invoices.slice().reverse().slice(0, 6);
   const recentEntries = report.dailyBook.slice().reverse().slice(0, 6);
   const breakdownConfig = getBreakdownConfig(activeBreakdown);
@@ -157,39 +142,10 @@ function Dashboard() {
         <MetricCard label="Stock Value" value={formatMoney(stockValue)} accent="#334155" onClick={() => openBreakdown("stockValue")} />
         <MetricCard label="Total Products" value={totalProductCount} accent="#475569" onClick={() => navigate("/products")} />
         <MetricCard label="Low Stock" value={lowStockCount} accent="#c2410c" onClick={() => goToLowStock()} />
-        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => openBreakdown("udhar")} />
-        <MetricCard label="Paid Daily Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => navigate("/daily-book?type=expense")} />
-        <MetricCard label="Stock Purchase" value={formatMoney(stockPurchaseExpense)} accent="#6d4c1d" onClick={() => openBreakdown("stockPurchase")} />
+        <MetricCard label="Udhar Pending" value={formatMoney(totals.udhar)} accent="#b91c1c" onClick={() => navigate("/old-bills?udhar=1")} />
+        <MetricCard label="Labour / Shop Expense" value={formatMoney(totals.expense)} accent="#7f1d1d" onClick={() => navigate("/daily-book?type=expense")} />
+        <MetricCard label="Parts / Stock Purchase" value={formatMoney(stockPurchaseExpense)} accent="#6d4c1d" onClick={() => openBreakdown("stockPurchase")} />
       </div>
-
-      <section className="dashboard-panel dashboard-panel-wide" style={explainPanelStyle}>
-        <div style={panelHeader}>
-          <h2 style={panelTitle}>Profit Samjho</h2>
-          <button type="button" onClick={() => openBreakdown("netProfit")} style={refreshBtn}>Entry Detail</button>
-        </div>
-        <div style={explainGrid}>
-          <div style={explainCard}>
-            <span style={explainLabel}>Gross Profit</span>
-            <strong style={positiveAmount}>{formatMoney(grossProfit)}</strong>
-            <p style={explainText}>Washing profit + accessories profit. Udhar bill ka profit bhi yahi count hota hai.</p>
-          </div>
-          <div style={explainCard}>
-            <span style={explainLabel}>Paid Expense</span>
-            <strong style={negativeAmount}>{formatMoney(totals.expense)}</strong>
-            <p style={explainText}>Sirf labour/service/bhada type kharcha net profit se minus hota hai. Resale stock purchase alag rahega.</p>
-          </div>
-          <div style={explainCard}>
-            <span style={explainLabel}>Net Profit</span>
-            <strong style={netProfit < 0 ? negativeAmount : positiveAmount}>{formatMoney(netProfit)}</strong>
-            <p style={explainText}>{profitReason}</p>
-          </div>
-          <div style={explainCard}>
-            <span style={explainLabel}>Udhar Pending</span>
-            <strong style={pendingAmount}>{formatMoney(totals.udhar)}</strong>
-            <p style={explainText}>{collectionNote}</p>
-          </div>
-        </div>
-      </section>
 
       <section className="dashboard-panel dashboard-panel-wide" style={widePanelStyle}>
         <div style={panelHeader}>
@@ -289,33 +245,6 @@ function Dashboard() {
       )}
 
       <div style={panelGrid}>
-        <section className="dashboard-panel" style={panelStyle}>
-          <div style={panelHeader}>
-            <h2 style={panelTitle}>Profit Breakdown</h2>
-          </div>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>Part</th>
-                <th style={thStyle}>Detail</th>
-                <th style={thStyle}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {profitBreakdown.map((row) => (
-                <tr key={row.label}>
-                  <td style={row.type === "final" ? strongTd : tdStyle}>{row.label}</td>
-                  <td style={tdStyle}>{row.note}</td>
-                  <td style={profitAmountStyle(row.type)}>
-                    {row.type === "minus" ? "- " : ""}
-                    {formatMoney(row.amount)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
         <section className="dashboard-panel" style={panelStyle}>
           <div style={panelHeader}>
             <h2 style={panelTitle}>This Month Bills</h2>
@@ -819,24 +748,15 @@ const cardValue = { fontSize: "26px", fontWeight: "900", marginTop: "12px" };
 const panelGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "18px" };
 const panelStyle = { background: "rgba(255,255,255,0.96)", borderRadius: "20px", boxShadow: "0 16px 38px rgba(15, 23, 42, 0.08)", overflow: "hidden", border: "1px solid rgba(226,232,240,0.88)" };
 const widePanelStyle = { ...panelStyle, marginBottom: "18px" };
-const explainPanelStyle = { ...widePanelStyle, borderTop: "4px solid #166534" };
 const panelHeader = { padding: "15px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" };
 const panelTitle = { margin: 0, fontSize: "17px", color: "#0f2963" };
 const refreshBtn = { border: "1px solid #0f2963", background: "#ffffff", color: "#0f2963", borderRadius: "5px", padding: "7px 11px", fontWeight: "800", cursor: "pointer" };
-const explainGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", padding: "16px" };
-const explainCard = { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", minHeight: "132px" };
-const explainLabel = { display: "block", color: "#64748b", fontSize: "12px", fontWeight: "900", textTransform: "uppercase", marginBottom: "9px" };
-const explainText = { margin: "10px 0 0", color: "#475569", fontSize: "13px", lineHeight: 1.45 };
-const positiveAmount = { color: "#166534", fontSize: "24px", fontWeight: "900" };
-const negativeAmount = { color: "#b91c1c", fontSize: "24px", fontWeight: "900" };
-const pendingAmount = { color: "#9c742a", fontSize: "24px", fontWeight: "900" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
 const tableWrap = { overflowX: "auto" };
 const detailTableStyle = { ...tableStyle, minWidth: "760px" };
 const thStyle = { textAlign: "left", padding: "11px 14px", background: "#f8fafc", color: "#475569", fontSize: "12px", textTransform: "uppercase", borderBottom: "1px solid #e2e8f0" };
 const tdStyle = { padding: "12px 14px", borderBottom: "1px solid #edf2f7", color: "#334155", fontSize: "13px" };
 const amountTd = { ...tdStyle, color: "#0f2963", fontWeight: "900", whiteSpace: "nowrap" };
-const strongTd = { ...tdStyle, color: "#0f172a", fontWeight: "900" };
 const emptyTd = { ...tdStyle, textAlign: "center", color: "#94a3b8" };
 const alertBox = { background: "#fff7ed", border: "1px solid #fb923c", color: "#9a3412", padding: "14px", borderRadius: "8px", marginBottom: "18px" };
 const alertList = { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" };
@@ -845,10 +765,5 @@ const breakdownGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, 
 const miniPanel = { border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", background: "#ffffff" };
 const miniTitle = { margin: 0, padding: "12px 14px", borderBottom: "1px solid #e2e8f0", color: "#0f2963", fontSize: "15px" };
 const clickableRow = { cursor: "pointer" };
-
-function profitAmountStyle(type) {
-  const color = type === "minus" ? "#b91c1c" : type === "final" ? "#0f5132" : "#0f2963";
-  return { ...amountTd, color, fontSize: type === "final" ? "15px" : "13px" };
-}
 
 export default Dashboard;

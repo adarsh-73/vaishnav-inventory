@@ -67,7 +67,8 @@ function MonthlyStatement() {
         <MetricCard label="Accessories Sale" value={formatMoney(report.totals.accessories)} accent="#0f2963" />
         <MetricCard label="Accessories Profit" value={formatMoney(report.totals.accessoriesProfit)} accent="#15803d" />
         <MetricCard label="Gross Profit" value={formatMoney(report.grossProfit)} accent="#166534" />
-        <MetricCard label="Paid Expense" value={formatMoney(report.totals.expense)} accent="#b91c1c" />
+        <MetricCard label="Labour / Shop Expense" value={formatMoney(report.totals.expense)} accent="#b91c1c" />
+        <MetricCard label="Parts / Stock Purchase" value={formatMoney(report.totals.stockPurchaseExpense)} accent="#6d4c1d" />
         <MetricCard label="Net Profit" value={formatMoney(report.netProfit)} accent="#0f5132" />
         <MetricCard label="Udhar Pending" value={formatMoney(report.totals.udhar)} accent="#dc2626" onClick={() => goToUdhar()} />
         <MetricCard label="Current Stock Value" value={formatMoney(stockValue)} accent="#334155" />

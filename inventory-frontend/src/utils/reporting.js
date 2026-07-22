@@ -164,7 +164,11 @@ export function getStatementRows({ invoices = [], dailyBook = [], monthKey = get
 }
 
 export function isStockPurchaseExpense(entry) {
+  const category = String(entry?.incomeCategory || entry?.businessCategory || "").toLowerCase();
+  if (/(parts?|stock|spare|accessor|purchase)/i.test(category)) return true;
+  if (/(service|labou?r|rent|utility|salary|shop|other)/i.test(category)) return false;
+
   const text = `${entry?.partyName || ""} ${entry?.note || ""}`.toLowerCase();
-  if (/(service charge|labou?r|rent|fauke)/i.test(text)) return false;
+  if (/(service charge|labou?r|rent|salary|utility|fauke)/i.test(text)) return false;
   return /(spare|parts|seat cover|indicator|parking|led|lead|bulb|light|air filter|oil filter|engine oil|mud flap|door visor|ambient|mirror|wiper|tape|wire|cutter)/i.test(text);
 }

@@ -20,6 +20,8 @@ function OldBills() {
   const [retentionYears, setRetentionYears] = useState(2);
   const [cleanupPreview, setCleanupPreview] = useState(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const isUdharMode = searchParams.get("udhar") === "1";
+  const selectedUdharParty = searchParams.get("party") || "";
 
   const loadInvoices = useCallback(async () => {
     setLoading(true);
@@ -60,10 +62,16 @@ function OldBills() {
 
   const filteredInvoices = useMemo(() => {
     const text = query.trim().toLowerCase();
-    const udharOnly = searchParams.get("udhar") === "1";
+    const udharOnly = isUdharMode;
     let nextInvoices = udharOnly
       ? invoices.filter((invoice) => Number(invoice.remainingAmount || 0) > 0)
       : invoices;
+
+    if (udharOnly && selectedUdharParty) {
+      nextInvoices = nextInvoices.filter((invoice) =>
+        normalizeParty(invoice.customer?.customerName || "Customer") === normalizeParty(selectedUdharParty)
+      );
+    }
 
     if (!text) return nextInvoices;
 
@@ -84,18 +92,24 @@ function OldBills() {
 
       return String(fields[searchBy] || "").toLowerCase().includes(text);
     });
-  }, [invoices, query, searchBy, searchParams]);
+  }, [invoices, isUdharMode, query, searchBy, selectedUdharParty]);
 
   const filteredDailyBookUdhar = useMemo(() => {
-    if (searchParams.get("udhar") !== "1") return [];
+    if (!isUdharMode) return [];
     const text = query.trim().toLowerCase();
-    const pending = dailyBookEntries.filter((entry) => {
+    let pending = dailyBookEntries.filter((entry) => {
       if (entry.paymentStatus !== "udhar") return false;
       const note = String(entry.note || "").toLowerCase();
       const alreadyShownAsBill = note.includes("invoice ")
         && invoices.some((invoice) => invoice.invoiceNumber && note.includes(String(invoice.invoiceNumber).toLowerCase()));
       return !alreadyShownAsBill;
     });
+
+    if (selectedUdharParty) {
+      pending = pending.filter((entry) =>
+        normalizeParty(entry.partyName || "Party") === normalizeParty(selectedUdharParty)
+      );
+    }
 
     if (!text) return pending;
 
@@ -114,10 +128,10 @@ function OldBills() {
 
       return String(fields[searchBy] || "").toLowerCase().includes(text);
     });
-  }, [dailyBookEntries, invoices, query, searchBy, searchParams]);
+  }, [dailyBookEntries, invoices, isUdharMode, query, searchBy, selectedUdharParty]);
 
   const allUdharRows = useMemo(() => {
-    if (searchParams.get("udhar") !== "1") return [];
+    if (!isUdharMode) return [];
 
     const billRows = filteredInvoices.map((invoice) => ({
       id: `bill-${invoice.id}`,
@@ -144,16 +158,48 @@ function OldBills() {
     }));
 
     return [...dailyRows, ...billRows].sort((a, b) => b.amount - a.amount);
-  }, [filteredDailyBookUdhar, filteredInvoices, searchParams]);
+  }, [filteredDailyBookUdhar, filteredInvoices, isUdharMode]);
+
+  const allPendingUdharRows = useMemo(() => {
+    if (!isUdharMode) return [];
+    const billRows = invoices
+      .filter((invoice) => Number(invoice.remainingAmount || 0) > 0)
+      .map((invoice) => ({
+        party: invoice.customer?.customerName || "Customer",
+        amount: Number(invoice.remainingAmount || 0)
+      }));
+    const dailyRows = dailyBookEntries
+      .filter((entry) => {
+        if (entry.paymentStatus !== "udhar") return false;
+        const note = String(entry.note || "").toLowerCase();
+        const alreadyShownAsBill = note.includes("invoice ")
+          && invoices.some((invoice) => invoice.invoiceNumber && note.includes(String(invoice.invoiceNumber).toLowerCase()));
+        return !alreadyShownAsBill;
+      })
+      .map((entry) => ({
+        party: entry.partyName || "Party",
+        amount: Number(entry.amount || 0)
+      }));
+    return [...billRows, ...dailyRows];
+  }, [dailyBookEntries, invoices, isUdharMode]);
 
   const udharPartyTotals = useMemo(() => {
     const totals = new Map();
-    allUdharRows.forEach((row) => {
+    allPendingUdharRows.forEach((row) => {
       const key = row.party.trim() || "Party";
       totals.set(key, (totals.get(key) || 0) + row.amount);
     });
-    return Array.from(totals.entries()).map(([party, amount]) => ({ party, amount }));
-  }, [allUdharRows]);
+    return Array.from(totals.entries())
+      .map(([party, amount]) => ({ party, amount }))
+      .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
+  }, [allPendingUdharRows]);
+
+  useEffect(() => {
+    if (!isUdharMode || filteredInvoices.length === 0) return;
+    if (!selectedInvoice || !filteredInvoices.some((invoice) => invoice.id === selectedInvoice.id)) {
+      setSelectedInvoice(filteredInvoices[0]);
+    }
+  }, [filteredInvoices, isUdharMode, selectedInvoice]);
 
   const invoiceMessage = useMemo(() => {
     if (!selectedInvoice) return "";
@@ -427,7 +473,7 @@ function OldBills() {
       <div className="no-print" style={panelStyle}>
         <div style={headerRow}>
             <div>
-            <h1 style={titleStyle}>{searchParams.get("udhar") === "1" ? "Udhar Pending Bills" : "Old Bills"}</h1>
+            <h1 style={titleStyle}>{isUdharMode ? "Udhar Pending Bills" : "Old Bills"}</h1>
             <div style={subText}>Purane bills search karke print, PDF, WhatsApp resend ya udhar paid update karo.</div>
           </div>
           <button onClick={loadInvoices} style={secondaryBtn}>{loading ? "Loading..." : "Refresh"}</button>
@@ -452,7 +498,7 @@ function OldBills() {
           />
           <span style={countText}>
             {filteredInvoices.length} bill found
-            {searchParams.get("udhar") === "1" ? ` + ${filteredDailyBookUdhar.length} daily-book udhar` : ""}
+            {isUdharMode ? ` + ${filteredDailyBookUdhar.length} daily-book udhar` : ""}
           </span>
         </div>
 
@@ -513,15 +559,23 @@ function OldBills() {
           </section>
         )}
 
-        {searchParams.get("udhar") === "1" && (
+        {isUdharMode && (
           <div style={allUdharPanel}>
             <div style={sectionHeaderRow}>
-              <h2 style={sectionTitle}>All Pending Udhar</h2>
+              <h2 style={sectionTitle}>{selectedUdharParty ? `${selectedUdharParty} Pending Udhar` : "All Pending Udhar"}</h2>
               <strong style={totalDueText}>Total Due: Rs. {allUdharRows.reduce((sum, row) => sum + row.amount, 0)}</strong>
             </div>
             <div style={partyPillRow}>
+              <button type="button" onClick={() => navigate("/old-bills?udhar=1")} style={!selectedUdharParty ? activePartyPill : partyPill}>
+                All: Rs. {allPendingUdharRows.reduce((sum, row) => sum + row.amount, 0)}
+              </button>
               {udharPartyTotals.map((item) => (
-                <button key={item.party} type="button" onClick={() => setQuery(item.party)} style={partyPill}>
+                <button
+                  key={item.party}
+                  type="button"
+                  onClick={() => navigate(`/old-bills?udhar=1&party=${encodeURIComponent(item.party)}`)}
+                  style={normalizeParty(item.party) === normalizeParty(selectedUdharParty) ? activePartyPill : partyPill}
+                >
                   {item.party}: Rs. {item.amount}
                 </button>
               ))}
@@ -558,30 +612,6 @@ function OldBills() {
                 )}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {searchParams.get("udhar") === "1" && filteredDailyBookUdhar.length > 0 && (
-          <div style={dailyBookUdharPanel}>
-            <h2 style={sectionTitle}>Daily Book Udhar</h2>
-            <div style={resultGrid}>
-              {filteredDailyBookUdhar.map((entry) => (
-                <div key={entry.id} style={dailyBookCardStyle}>
-                  <strong>{entry.partyName || "Party"}</strong>
-                  <span>{formatDate(entry.entryDate || entry.createdDate)} | {entry.entryType || "-"}</span>
-                  <span>{entry.note || "-"}</span>
-                  <span style={udharBadge}>Udhar Rs. {entry.amount || 0}</span>
-                  <div style={cardActionRow}>
-                    <button type="button" onClick={() => handleMarkDailyBookPaid(entry)} style={miniPaidBtn}>
-                      Mark Paid
-                    </button>
-                    <button type="button" onClick={() => navigate("/daily-book")} style={miniEditBtn}>
-                      Daily Book
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
@@ -800,6 +830,10 @@ function formatDate(value) {
   return value ? String(value).slice(0, 10) : "-";
 }
 
+function normalizeParty(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function formatBytes(value) {
   const bytes = Number(value || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -851,14 +885,13 @@ const cleanupResult = { marginTop: "12px", padding: "12px", border: "1px solid #
 const resultGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "10px", marginTop: "16px" };
 const billCardStyle = { textAlign: "left", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#f8fafc", cursor: "pointer", display: "flex", flexDirection: "column", gap: "4px", color: "#0f172a" };
 const selectedCardStyle = { ...billCardStyle, border: "2px solid #0f2963", background: "#eef2ff" };
-const dailyBookUdharPanel = { marginTop: "18px", padding: "14px", border: "1px solid #fecaca", borderRadius: "8px", background: "#fff7f7" };
 const sectionTitle = { margin: "0 0 10px", color: "#991b1b", fontSize: "18px" };
-const dailyBookCardStyle = { ...billCardStyle, border: "1px solid #fecaca", background: "#ffffff", cursor: "default" };
 const allUdharPanel = { marginTop: "18px", padding: "14px", border: "1px solid #fca5a5", borderRadius: "8px", background: "#fff7ed", overflowX: "auto" };
 const sectionHeaderRow = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" };
 const totalDueText = { color: "#991b1b", fontSize: "16px" };
 const partyPillRow = { display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0 12px" };
 const partyPill = { border: "1px solid #fca5a5", background: "#ffffff", color: "#991b1b", borderRadius: "999px", padding: "7px 10px", fontWeight: "900", cursor: "pointer" };
+const activePartyPill = { ...partyPill, background: "#991b1b", color: "#ffffff" };
 const miniTable = { width: "100%", borderCollapse: "collapse", background: "#ffffff", borderRadius: "8px", overflow: "hidden" };
 const miniTh = { textAlign: "left", padding: "10px", background: "#991b1b", color: "#ffffff", fontSize: "12px", whiteSpace: "nowrap" };
 const miniTd = { padding: "10px", borderBottom: "1px solid #fee2e2", color: "#334155", fontSize: "13px", verticalAlign: "top" };
