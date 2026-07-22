@@ -10,6 +10,7 @@ const DRY_RUN = String(process.env.DRY_RUN || "true").toLowerCase() !== "false";
 const HEADLESS = String(process.env.HEADLESS || "true").toLowerCase() !== "false";
 const DEFAULT_CHROME_PATH = "/Users/adarshsingh/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 const CHROME_PATH = process.env.PLAYWRIGHT_CHROME_PATH || DEFAULT_CHROME_PATH;
+const CATALOG_URL = clean(process.env.CATALOG_URL);
 
 const vehicle = {
   make: process.env.VEHICLE_MAKE || "MAHINDRA",
@@ -46,6 +47,14 @@ function categoryFromBreadcrumb(items) {
 }
 
 async function openVehicleCatalog(page) {
+  if (CATALOG_URL) {
+    await page.goto(CATALOG_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(1200);
+    if (!page.url().includes("oriparts.com")) {
+      throw new Error(`Direct OEM catalog open nahi hua: ${page.url()}`);
+    }
+    return page;
+  }
   await page.goto("https://boodmo.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
   const selects = page.locator("select");
   await selects.nth(0).selectOption({ label: vehicle.make });
