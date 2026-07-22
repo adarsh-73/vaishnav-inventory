@@ -50,7 +50,6 @@ function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/products" element={<Products />} />
-              <Route path="/accessories-catalog" element={<Navigate to="/" replace />} />
               <Route path="/purchase" element={<Purchase />} />
               <Route path="/billing" element={<BillingPage />} />
               <Route path="/old-bills" element={<OldBills />} />

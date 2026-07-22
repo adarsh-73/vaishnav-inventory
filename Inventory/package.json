@@ -3,15 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "boodmo": "node automation/boodmo-service.js",
-    "boodmo:import": "node automation/boodmo-catalog-import.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"No backend node scripts are needed for the shop app.\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
-  "dependencies": {
-    "playwright": "^1.60.0"
-  }
+  "dependencies": {}
 }
