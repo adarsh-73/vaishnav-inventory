@@ -188,11 +188,13 @@ function OldBills() {
   const udharPartyTotals = useMemo(() => {
     const totals = new Map();
     allPendingUdharRows.forEach((row) => {
-      const key = row.party.trim() || "Party";
-      totals.set(key, (totals.get(key) || 0) + row.amount);
+      const party = String(row.party || "").trim().replace(/\s+/g, " ") || "Party";
+      const key = normalizeParty(party);
+      const current = totals.get(key) || { party, amount: 0 };
+      current.amount += row.amount;
+      totals.set(key, current);
     });
-    return Array.from(totals.entries())
-      .map(([party, amount]) => ({ party, amount }))
+    return Array.from(totals.values())
       .sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
   }, [allPendingUdharRows]);
 
@@ -833,7 +835,7 @@ function formatDate(value) {
 }
 
 function normalizeParty(value) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function formatBytes(value) {
