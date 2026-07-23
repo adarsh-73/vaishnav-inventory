@@ -11,8 +11,8 @@ function Purchase() {
   const loadData = async () => {
     try {
       const [productData, purchaseData] = await Promise.all([
-        apiRequest("/products"),
-        apiRequest("/purchases")
+        apiRequest("/products/options"),
+        apiRequest("/purchases/recent?limit=20")
       ]);
       setProducts(Array.isArray(productData) ? productData : []);
       setPurchases(Array.isArray(purchaseData) ? purchaseData : []);
@@ -77,7 +77,7 @@ function Purchase() {
             <tr><th style={thStyle}>Date</th><th style={thStyle}>Product</th><th style={thStyle}>Qty</th><th style={thStyle}>Buy Price</th><th style={thStyle}>Sell Price</th><th style={thStyle}>Bill No</th></tr>
           </thead>
           <tbody>
-            {purchases.slice().reverse().slice(0, 10).map((purchase) => (
+            {purchases.map((purchase) => (
               <tr key={purchase.id}>
                 <td style={tdStyle}>{String(purchase.purchaseDate || purchase.createdDate || "").slice(0, 10)}</td>
                 <td style={tdStyle}>{purchase.productdata?.productName || "-"}</td>

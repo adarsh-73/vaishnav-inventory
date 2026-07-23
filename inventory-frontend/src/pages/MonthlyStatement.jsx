@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../utils/api";
 import { calculateReport, getCurrentMonthKey, getMonthLabel, getStatementRows } from "../utils/reporting";
@@ -11,13 +11,13 @@ function MonthlyStatement() {
   const [monthKey, setMonthKey] = useState(getCurrentMonthKey());
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [productsData, dailyBookData, invoicesData] = await Promise.all([
-        apiRequest("/products"),
-        apiRequest("/daily-book"),
-        apiRequest("/invoices")
+        apiRequest("/products/options"),
+        apiRequest(`/daily-book/month?month=${monthKey}`),
+        apiRequest(`/invoices/month?month=${monthKey}&limit=500`)
       ]);
       setProducts(Array.isArray(productsData) ? productsData : []);
       setDailyBook(Array.isArray(dailyBookData) ? dailyBookData : []);
@@ -27,11 +27,11 @@ function MonthlyStatement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [monthKey]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const report = useMemo(() => calculateReport({ invoices, dailyBook, monthKey }), [invoices, dailyBook, monthKey]);
   const rows = useMemo(() => getStatementRows({ invoices, dailyBook, monthKey }), [invoices, dailyBook, monthKey]);

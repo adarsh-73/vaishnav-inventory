@@ -42,11 +42,8 @@ public class InvoiceController {
 
     @GetMapping("/recent")
     public List<Invoice> getRecentInvoices(@RequestParam(defaultValue = "8") int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, 50));
-        List<Long> ids = invoiceRepository.findRecentIds(PageRequest.of(0, safeLimit));
-        Map<Long, Invoice> invoicesById = invoiceRepository.findByIdIn(ids).stream()
-                .collect(Collectors.toMap(Invoice::getId, Function.identity()));
-        return ids.stream().map(invoicesById::get).filter(java.util.Objects::nonNull).toList();
+        List<Long> ids = invoiceRepository.findRecentIds(PageRequest.of(0, safeLimit(limit)));
+        return loadInvoicesInOrder(ids);
     }
 
     @GetMapping("/current-month")
@@ -58,9 +55,21 @@ public class InvoiceController {
                 .findByInvoiceDateGreaterThanEqualAndInvoiceDateLessThanOrderByInvoiceDateDesc(start, end);
     }
 
+    @GetMapping("/month")
+    public List<Invoice> getMonthInvoices(@RequestParam String month,
+                                          @RequestParam(defaultValue = "300") int limit) {
+        LocalDate monthStart = java.time.YearMonth.parse(month).atDay(1);
+        LocalDateTime start = monthStart.atStartOfDay();
+        LocalDateTime end = monthStart.plusMonths(1).atStartOfDay();
+        List<Long> ids = invoiceRepository.findMonthIds(start, end, PageRequest.of(0, safeLimit(limit)));
+        return loadInvoicesInOrder(ids);
+    }
+
     @GetMapping("/pending-udhar")
-    public List<Invoice> getPendingUdharInvoices() {
-        return invoiceRepository.findPendingUdharBills();
+    public List<Invoice> getPendingUdharInvoices(@RequestParam(defaultValue = "0") int page,
+                                                 @RequestParam(defaultValue = "200") int size) {
+        List<Long> ids = invoiceRepository.findPendingUdharIds(PageRequest.of(Math.max(0, page), safeLimit(size)));
+        return loadInvoicesInOrder(ids);
     }
 
     @GetMapping("/{id}")
@@ -103,5 +112,18 @@ public class InvoiceController {
     public Map<String, Object> cleanupOldBills(@RequestParam(defaultValue = "2") int years,
                                                @RequestParam String confirmation) {
         return invoiceStorageService.cleanup(years, confirmation);
+    }
+
+    private List<Invoice> loadInvoicesInOrder(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Invoice> invoicesById = invoiceRepository.findByIdIn(ids).stream()
+                .collect(Collectors.toMap(Invoice::getId, Function.identity()));
+        return ids.stream().map(invoicesById::get).filter(java.util.Objects::nonNull).toList();
+    }
+
+    private int safeLimit(int limit) {
+        return Math.max(1, Math.min(limit, 500));
     }
 }

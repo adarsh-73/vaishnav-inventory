@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { todayDate } from "../utils/storage";
 import { apiRequest, isWashingEntry } from "../utils/api";
@@ -14,27 +14,32 @@ function DailyBook() {
   const activeBucket = searchParams.get("bucket") || "";
   const selectedEntryId = searchParams.get("entryId") || "";
 
-  const loadEntries = async (loadAll = false) => {
+  const loadEntries = useCallback(async (loadAll = false) => {
     try {
+      const dailyPath = activeType === "udhar"
+        ? "/daily-book/udhar?size=300"
+        : loadAll
+          ? "/daily-book?size=300"
+          : "/daily-book/current-month";
       const [dailyData, invoiceData] = await Promise.all([
-        apiRequest(loadAll ? "/daily-book" : "/daily-book/current-month"),
-        apiRequest("/invoices", { timeoutMs: 12000 }).catch(() => [])
+        apiRequest(dailyPath),
+        apiRequest("/invoices/pending-udhar?size=300", { timeoutMs: 8000 }).catch(() => [])
       ]);
       setEntries(Array.isArray(dailyData) ? dailyData : []);
       setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
     } catch {
       const [dailyData, invoiceData] = await Promise.all([
-        apiRequest("/daily-book"),
-        apiRequest("/invoices", { timeoutMs: 12000 }).catch(() => [])
+        apiRequest("/daily-book?size=100"),
+        apiRequest("/invoices/pending-udhar?size=100", { timeoutMs: 8000 }).catch(() => [])
       ]);
       setEntries(Array.isArray(dailyData) ? dailyData : []);
       setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
     }
-  };
+  }, [activeType]);
 
   useEffect(() => {
     loadEntries(activeType === "udhar");
-  }, [activeType]);
+  }, [activeType, loadEntries]);
 
   useEffect(() => {
     if (!entries.length) return;
@@ -125,7 +130,7 @@ function DailyBook() {
       body: JSON.stringify(payload)
       });
       resetForm();
-      loadEntries();
+      loadEntries(activeType === "udhar");
     } catch (error) {
       alert(`Daily book save nahi hua: ${error.message}`);
     }

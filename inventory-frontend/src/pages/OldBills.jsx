@@ -26,15 +26,16 @@ function OldBills() {
   const loadInvoices = useCallback(async () => {
     setLoading(true);
     try {
-      const invoicePath = isUdharMode ? "/invoices/pending-udhar" : "/invoices";
+      const invoicePath = isUdharMode ? "/invoices/pending-udhar?size=300" : "/invoices/recent?limit=100";
+      const dailyBookPath = isUdharMode ? "/daily-book/udhar?size=300" : null;
       const [invoiceResponse, dailyBookResponse] = await Promise.all([
         fetch(`${API_BASE}${invoicePath}`),
-        fetch(`${API_BASE}/daily-book`)
+        dailyBookPath ? fetch(`${API_BASE}${dailyBookPath}`) : Promise.resolve(null)
       ]);
       if (!invoiceResponse.ok) throw new Error("Bills load nahi hue");
-      if (!dailyBookResponse.ok) throw new Error("Daily book load nahi hua");
+      if (dailyBookResponse && !dailyBookResponse.ok) throw new Error("Daily book load nahi hua");
       const data = await invoiceResponse.json();
-      const dailyBookData = await dailyBookResponse.json();
+      const dailyBookData = dailyBookResponse ? await dailyBookResponse.json() : [];
       const unique = uniqueInvoicesByNumber(Array.isArray(data) ? data : []);
       setInvoices(unique);
       setDailyBookEntries(Array.isArray(dailyBookData) ? dailyBookData : []);

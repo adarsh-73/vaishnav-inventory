@@ -3,11 +3,14 @@ package com.vaishnav.Inventory.Controller;
 import com.vaishnav.Inventory.entity.DailyBookEntry;
 import com.vaishnav.Inventory.repository.DailyBookEntryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.YearMonth;
 
 @RestController
 @RequestMapping("/daily-book")
@@ -17,8 +20,13 @@ public class DailyBookController {
     private DailyBookEntryRepository dailyBookEntryRepository;
 
     @GetMapping
-    public List<DailyBookEntry> getEntries() {
-        return dailyBookEntryRepository.findAll();
+    public List<DailyBookEntry> getEntries(@RequestParam(defaultValue = "0") int page,
+                                           @RequestParam(defaultValue = "100") int size) {
+        return dailyBookEntryRepository.findAll(PageRequest.of(
+                safePage(page),
+                safeSize(size),
+                Sort.by(Sort.Direction.DESC, "entryDate").and(Sort.by(Sort.Direction.DESC, "id"))
+        )).getContent();
     }
 
     @GetMapping("/current-month")
@@ -26,6 +34,20 @@ public class DailyBookController {
         LocalDate start = LocalDate.now(ZoneId.of("Asia/Kolkata")).withDayOfMonth(1);
         return dailyBookEntryRepository
                 .findByEntryDateGreaterThanEqualAndEntryDateLessThanOrderByEntryDateDesc(start, start.plusMonths(1));
+    }
+
+    @GetMapping("/month")
+    public List<DailyBookEntry> getMonthEntries(@RequestParam String month) {
+        YearMonth yearMonth = YearMonth.parse(month);
+        LocalDate start = yearMonth.atDay(1);
+        return dailyBookEntryRepository
+                .findByEntryDateGreaterThanEqualAndEntryDateLessThanOrderByEntryDateDesc(start, start.plusMonths(1));
+    }
+
+    @GetMapping("/udhar")
+    public List<DailyBookEntry> getManualUdhar(@RequestParam(defaultValue = "0") int page,
+                                               @RequestParam(defaultValue = "200") int size) {
+        return dailyBookEntryRepository.findManualUdhar(PageRequest.of(safePage(page), safeSize(size)));
     }
 
     @PostMapping
@@ -51,5 +73,13 @@ public class DailyBookController {
     public String deleteEntry(@PathVariable Long id) {
         dailyBookEntryRepository.deleteById(id);
         return "Daily book entry deleted";
+    }
+
+    private int safePage(int page) {
+        return Math.max(0, page);
+    }
+
+    private int safeSize(int size) {
+        return Math.max(1, Math.min(size, 500));
     }
 }

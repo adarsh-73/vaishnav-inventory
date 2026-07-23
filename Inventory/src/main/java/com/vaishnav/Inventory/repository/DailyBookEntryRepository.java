@@ -1,6 +1,7 @@
 package com.vaishnav.Inventory.repository;
 
 import com.vaishnav.Inventory.entity.DailyBookEntry;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -50,6 +51,15 @@ public interface DailyBookEntryRepository extends JpaRepository<DailyBookEntry, 
               and (e.note is null or lower(e.note) not like '%invoice%')
             """)
     Double sumManualUdharAll();
+
+    @Query("""
+            select e
+            from DailyBookEntry e
+            where lower(e.paymentStatus) = 'udhar'
+              and (e.note is null or lower(e.note) not like '%invoice%')
+            order by e.entryDate desc, e.id desc
+            """)
+    List<DailyBookEntry> findManualUdhar(Pageable pageable);
 
     int deleteByNoteContainingIgnoreCase(String note);
 }

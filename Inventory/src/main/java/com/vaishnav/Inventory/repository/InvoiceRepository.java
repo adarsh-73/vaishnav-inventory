@@ -26,6 +26,13 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     @Query("select i.id from Invoice i order by i.createdDate desc")
     List<Long> findRecentIds(Pageable pageable);
 
+    @Query("""
+            select i.id from Invoice i
+            where i.invoiceDate >= :start and i.invoiceDate < :end
+            order by i.invoiceDate desc
+            """)
+    List<Long> findMonthIds(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end, Pageable pageable);
+
     @EntityGraph(attributePaths = {"customer", "invoiceItems", "invoiceItems.productInvoiceitem"})
     List<Invoice> findByIdIn(List<Long> ids);
 
@@ -56,13 +63,12 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
             """)
     Double sumRemainingAll();
 
-    @EntityGraph(attributePaths = {"customer", "invoiceItems", "invoiceItems.productInvoiceitem"})
     @Query("""
-            select i from Invoice i
+            select i.id from Invoice i
             where i.remainingAmount is not null and i.remainingAmount > 0
             order by i.invoiceDate desc
             """)
-    List<Invoice> findPendingUdharBills();
+    List<Long> findPendingUdharIds(Pageable pageable);
 
     @Query("""
             select distinct i from Invoice i

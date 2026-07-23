@@ -38,7 +38,7 @@ export default function VaishnavFinalInvoice() {
 
   const loadBackendProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE}/products`);
+      const response = await fetch(`${API_BASE}/products/options`);
       if (!response.ok) throw new Error("Products API failed");
       const data = await response.json();
       setBackendProducts(Array.isArray(data) ? data : []);
@@ -405,18 +405,7 @@ export default function VaishnavFinalInvoice() {
         const invoice = await response.json();
         loadInvoiceForEdit(invoice);
       } catch (error) {
-        try {
-          const fallbackResponse = await fetch(`${API_BASE}/invoices`);
-          if (!fallbackResponse.ok) throw error;
-          const list = await fallbackResponse.json();
-          const fallbackInvoice = Array.isArray(list)
-            ? list.find((invoice) => String(invoice.id || "") === String(invoiceId))
-            : null;
-          if (!fallbackInvoice) throw error;
-          loadInvoiceForEdit(fallbackInvoice);
-        } catch {
-          alert(`Bill edit load error: ${error.message}`);
-        }
+        alert(`Bill edit load error: ${error.message}`);
       }
     };
 

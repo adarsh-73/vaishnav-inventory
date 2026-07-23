@@ -9,8 +9,8 @@ function SellingItem() {
   const loadData = async () => {
     try {
       const [productData, invoiceData] = await Promise.all([
-        apiRequest("/products"),
-        apiRequest("/invoices")
+        apiRequest("/products/options"),
+        apiRequest("/invoices/recent?limit=20")
       ]);
       setProducts(Array.isArray(productData) ? productData : []);
       setSales(Array.isArray(invoiceData) ? invoiceData : []);

@@ -2,6 +2,7 @@ package com.vaishnav.Inventory.repository;
 
 import com.vaishnav.Inventory.entity.Purchase;
 import com.vaishnav.Inventory.entity.product;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -9,4 +10,6 @@ import java.util.List;
 public interface PurchaseRepository extends JpaRepository<Purchase, Long> {
 
     List<Purchase> findByProductdata(product productData);
+
+    List<Purchase> findAllByOrderByPurchaseDateDescIdDesc(Pageable pageable);
 }
