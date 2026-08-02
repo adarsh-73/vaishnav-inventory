@@ -9,7 +9,6 @@ const BillingPage = lazy(() => import("./pages/BillingPage"));
 const Quotation = lazy(() => import("./pages/Quotation"));
 const SellingItem = lazy(() => import("./pages/Selling-Item"));
 const DailyBook = lazy(() => import("./pages/DailyBook"));
-const ExpenseDashboard = lazy(() => import("./pages/ExpenseDashboard"));
 const Attendance = lazy(() => import("./pages/Attendance"));
 const OldBills = lazy(() => import("./pages/OldBills"));
 const MonthlyStatement = lazy(() => import("./pages/MonthlyStatement"));
@@ -27,7 +26,6 @@ function App() {
       import("./pages/Product");
       import("./pages/OldBills");
       import("./pages/DailyBook");
-      import("./pages/ExpenseDashboard");
     };
 
     if ("requestIdleCallback" in window) {
@@ -59,7 +57,6 @@ function App() {
               <Route path="/quotation" element={<Quotation />} />
               <Route path="/selling-item" element={<SellingItem />} />
               <Route path="/daily-book" element={<DailyBook />} />
-              <Route path="/expense-dashboard" element={<ExpenseDashboard />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

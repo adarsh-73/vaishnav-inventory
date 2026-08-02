@@ -44,6 +44,15 @@ public class DailyBookController {
                 .findByEntryDateGreaterThanEqualAndEntryDateLessThanOrderByEntryDateDesc(start, start.plusMonths(1));
     }
 
+    @GetMapping("/range")
+    public List<DailyBookEntry> getRangeEntries(@RequestParam String from,
+                                                @RequestParam String to) {
+        LocalDate start = LocalDate.parse(from);
+        LocalDate end = LocalDate.parse(to).plusDays(1);
+        return dailyBookEntryRepository
+                .findByEntryDateGreaterThanEqualAndEntryDateLessThanOrderByEntryDateDesc(start, end);
+    }
+
     @GetMapping("/udhar")
     public List<DailyBookEntry> getManualUdhar(@RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "200") int size) {

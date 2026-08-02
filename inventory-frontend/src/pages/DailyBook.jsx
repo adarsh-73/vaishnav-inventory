@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { todayDate } from "../utils/storage";
 import { apiRequest, isWashingEntry } from "../utils/api";
-import { isStockPurchaseExpense } from "../utils/reporting";
+import { getCurrentMonthKey, isStockPurchaseExpense } from "../utils/reporting";
 
 function DailyBook() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -10,14 +10,22 @@ function DailyBook() {
   const [invoices, setInvoices] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ entryDate: todayDate(), entryType: "expense", incomeCategory: "service", partyName: "", note: "", amount: "", paymentStatus: "paid" });
+  const [expenseFilters, setExpenseFilters] = useState({ month: getCurrentMonthKey(), from: "", to: "", category: "", search: "" });
   const activeType = searchParams.get("type") || "";
   const activeBucket = searchParams.get("bucket") || "";
   const selectedEntryId = searchParams.get("entryId") || "";
 
   const loadEntries = useCallback(async (loadAll = false) => {
     try {
+      const hasDateRange = expenseFilters.from || expenseFilters.to;
+      const rangeFrom = expenseFilters.from || `${expenseFilters.month || getCurrentMonthKey()}-01`;
+      const rangeTo = expenseFilters.to || getMonthEnd(expenseFilters.month || getCurrentMonthKey());
       const dailyPath = activeType === "udhar"
         ? "/daily-book/udhar?size=300"
+        : hasDateRange
+          ? `/daily-book/range?from=${rangeFrom}&to=${rangeTo}`
+          : expenseFilters.month
+            ? `/daily-book/month?month=${expenseFilters.month}`
         : loadAll
           ? "/daily-book?size=300"
           : "/daily-book/current-month";
@@ -35,7 +43,7 @@ function DailyBook() {
       setEntries(Array.isArray(dailyData) ? dailyData : []);
       setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
     }
-  }, [activeType]);
+  }, [activeType, expenseFilters.from, expenseFilters.month, expenseFilters.to]);
 
   useEffect(() => {
     loadEntries(activeType === "udhar");
@@ -94,6 +102,37 @@ function DailyBook() {
     if (activeType === "udhar") return totals.udhar;
     return visibleEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
   }, [activeType, totals.udhar, visibleEntries]);
+
+  const expenseStatementEntries = useMemo(() => {
+    const search = expenseFilters.search.trim().toLowerCase();
+    return accountEntries
+      .filter((entry) => entry.entryType === "expense")
+      .filter((entry) => {
+        if (!expenseFilters.category) return true;
+        if (expenseFilters.category === "stock") return isStockPurchaseExpense(entry);
+        if (expenseFilters.category === "shop") return !isStockPurchaseExpense(entry);
+        return String(entry.incomeCategory || "") === expenseFilters.category;
+      })
+      .filter((entry) => {
+        if (!search) return true;
+        return [
+          entry.entryDate,
+          entry.incomeCategory,
+          entry.partyName,
+          entry.note,
+          entry.amount,
+          isStockPurchaseExpense(entry) ? "spare stock purchase parts" : "labour shop expense"
+        ].join(" ").toLowerCase().includes(search);
+      });
+  }, [accountEntries, expenseFilters.category, expenseFilters.search]);
+
+  const expenseStatementTotals = useMemo(() => expenseStatementEntries.reduce((sum, entry) => {
+    const amount = Number(entry.amount || 0);
+    sum.total += amount;
+    if (isStockPurchaseExpense(entry)) sum.stock += amount;
+    else sum.shop += amount;
+    return sum;
+  }, { total: 0, shop: 0, stock: 0 }), [expenseStatementEntries]);
 
   const showEntries = (type, bucket = "") => {
     const params = {};
@@ -212,6 +251,52 @@ function DailyBook() {
         <button style={primaryBtn}>{editingId ? "Update Entry" : "Add Entry"}</button>
         {editingId && <button type="button" onClick={resetForm} style={secondaryBtn}>Cancel</button>}
       </form>
+      <div style={panelStyle}>
+        <div style={expenseHeaderStyle}>
+          <div>
+            <h2 style={sectionTitleStyle}>Expense Statement</h2>
+            <div style={mutedStyle}>Back date ka kharcha yahin search karo.</div>
+          </div>
+          <div style={expenseTotalStyle}>Total: Rs. {expenseStatementTotals.total.toLocaleString("en-IN")}</div>
+        </div>
+        <div style={expenseFilterGrid}>
+          <input type="month" value={expenseFilters.month} onChange={(e) => setExpenseFilters({ ...expenseFilters, month: e.target.value, from: "", to: "" })} style={inputStyle} />
+          <input type="date" value={expenseFilters.from} onChange={(e) => setExpenseFilters({ ...expenseFilters, from: e.target.value, month: "" })} style={inputStyle} />
+          <input type="date" value={expenseFilters.to} onChange={(e) => setExpenseFilters({ ...expenseFilters, to: e.target.value, month: "" })} style={inputStyle} />
+          <select value={expenseFilters.category} onChange={(e) => setExpenseFilters({ ...expenseFilters, category: e.target.value })} style={inputStyle}>
+            <option value="">All Expense</option>
+            <option value="shop">Labour / Shop Expense</option>
+            <option value="stock">Spare / Stock Purchase</option>
+            <option value="rent">Rent / Utility</option>
+            <option value="salary">Salary</option>
+            <option value="other">Other</option>
+          </select>
+          <input type="search" placeholder="Search kisko / kya / amount" value={expenseFilters.search} onChange={(e) => setExpenseFilters({ ...expenseFilters, search: e.target.value })} style={inputStyle} />
+        </div>
+        <div style={expenseMiniTotals}>
+          <strong>Labour/Shop: Rs. {expenseStatementTotals.shop.toLocaleString("en-IN")}</strong>
+          <strong>Spare/Stock: Rs. {expenseStatementTotals.stock.toLocaleString("en-IN")}</strong>
+          <button type="button" onClick={() => setExpenseFilters({ month: getCurrentMonthKey(), from: "", to: "", category: "", search: "" })} style={secondaryBtn}>Reset</button>
+        </div>
+        <table style={tableStyle}>
+          <thead><tr><th style={thStyle}>Date</th><th style={thStyle}>Category</th><th style={thStyle}>Paid To</th><th style={thStyle}>Note</th><th style={thStyle}>Amount</th><th style={thStyle}>Action</th></tr></thead>
+          <tbody>
+            {expenseStatementEntries.map((entry) => (
+              <tr key={`expense-statement-${entry.id}`}>
+                <td style={tdStyle}>{entry.entryDate}</td>
+                <td style={tdStyle}>{isStockPurchaseExpense(entry) ? "Spare / Stock" : formatExpenseCategory(entry.incomeCategory)}</td>
+                <td style={tdStyle}>{entry.partyName || "-"}</td>
+                <td style={tdStyle}>{entry.note || "-"}</td>
+                <td style={tdStyle}>Rs. {Number(entry.amount || 0).toLocaleString("en-IN")}</td>
+                <td style={tdStyle}><button onClick={() => editEntry(entry)} style={secondaryBtn}>Edit</button></td>
+              </tr>
+            ))}
+            {expenseStatementEntries.length === 0 && (
+              <tr><td style={emptyTd} colSpan="6">Is date/filter me koi expense nahi mila</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       <div id="daily-book-entries" style={panelStyle}>
         {activeType && (
           <div style={filterBar}>
@@ -261,6 +346,21 @@ function getActiveLabel(type, bucket) {
   return "Entries";
 }
 
+function getMonthEnd(monthKey) {
+  const [year, month] = String(monthKey).split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function formatExpenseCategory(category) {
+  if (category === "service") return "Labour / Shop";
+  if (category === "parts") return "Spare / Stock";
+  if (category === "rent") return "Rent / Utility";
+  if (category === "salary") return "Salary";
+  if (category === "other") return "Other";
+  return category || "-";
+}
+
 const pageStyle = { padding: "30px", background: "#f1f5f9", minHeight: "100vh" };
 const titleStyle = { margin: "0 0 20px", color: "#0f172a" };
 const summaryRow = { display: "flex", gap: "15px", flexWrap: "wrap", marginBottom: "18px" };
@@ -277,6 +377,12 @@ const summaryButtonCard = (accent, active) => ({
 const panelStyle = { background: "white", padding: "18px", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.08)", marginBottom: "18px", overflowX: "auto" };
 const filterBar = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "12px", color: "#7f1d1d" };
 const shownTotalStyle = { marginTop: "4px", color: "#7f1d1d", fontSize: "13px", fontWeight: "800" };
+const sectionTitleStyle = { margin: "0 0 4px", color: "#0f172a", fontSize: "22px" };
+const mutedStyle = { color: "#64748b", fontSize: "13px", fontWeight: "700" };
+const expenseHeaderStyle = { display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start", flexWrap: "wrap", marginBottom: "12px" };
+const expenseTotalStyle = { background: "#ecfdf5", color: "#0f766e", border: "1px solid #99f6e4", borderRadius: "8px", padding: "10px 12px", fontWeight: "900" };
+const expenseFilterGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "10px" };
+const expenseMiniTotals = { display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", margin: "8px 0 12px", color: "#334155" };
 const inputStyle = { padding: "11px", marginRight: "10px", marginBottom: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", minWidth: "160px" };
 const primaryBtn = { padding: "11px 18px", background: "#0f2963", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
 const secondaryBtn = { padding: "8px 10px", background: "#ffffff", color: "#0f2963", border: "1px solid #0f2963", borderRadius: "5px", cursor: "pointer", marginRight: "6px" };
