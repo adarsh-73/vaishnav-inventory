@@ -6,6 +6,7 @@ const navItems = [
   { to: "/products", icon: "P", label: "Products", preload: () => import("../pages/Product") },
   { to: "/old-bills", icon: "O", label: "Old Bills", preload: () => import("../pages/OldBills") },
   { to: "/daily-book", icon: "K", label: "Daily Book", preload: () => import("../pages/DailyBook") },
+  { to: "/expense-dashboard", icon: "E", label: "Expenses", preload: () => import("../pages/ExpenseDashboard") },
   { to: "/purchase", icon: "S", label: "Purchase", preload: () => import("../pages/Purchase") },
   { to: "/monthly-statement", icon: "M", label: "Statement", preload: () => import("../pages/MonthlyStatement") },
   { to: "/quotation", icon: "Q", label: "Quotation", preload: () => import("../pages/Quotation") },
