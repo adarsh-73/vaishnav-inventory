@@ -19,6 +19,8 @@ public interface ProductRepository extends JpaRepository<product, Long> {
     // ✅ 3. Search by product name (for UI / search feature)
     List<product> findByProductNameContainingIgnoreCase(String name);
 
+    List<product> findByQuantityGreaterThanOrderByProductNameAsc(Integer quantity);
+
     // ✅ 4. Filter low stock products (important for business)
     List<product> findByQuantityLessThan(Integer quantity);
 

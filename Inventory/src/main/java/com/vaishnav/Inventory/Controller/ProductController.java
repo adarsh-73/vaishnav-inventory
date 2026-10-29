@@ -28,6 +28,16 @@ public class ProductController {
         return productService.getAllProducts();
     }
 
+    @GetMapping("/available")
+    public List<product> getAvailableProducts() {
+        return productService.getAvailableProducts();
+    }
+
+    @GetMapping("/barcode/{barcode}")
+    public product getProductByBarcode(@PathVariable String barcode) {
+        return productService.getAvailableProductByBarcode(barcode);
+    }
+
     @GetMapping("/options")
     public List<Map<String, Object>> getProductOptions() {
         return productService.getAllProducts().stream()

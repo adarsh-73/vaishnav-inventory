@@ -63,6 +63,23 @@ public class ProductService {
                 .toList();
     }
 
+    public List<product> getAvailableProducts() {
+        return productRepository.findByQuantityGreaterThanOrderByProductNameAsc(0).stream()
+                .filter(productData -> !isDirectBillOnlyProduct(productData))
+                .map(productData -> ensureProductCodes(productData, resolveCodePrefix(productData)))
+                .toList();
+    }
+
+    public product getAvailableProductByBarcode(String barcode) {
+        product productData = productRepository.findByBarcode(barcode)
+                .orElseThrow(() -> new RuntimeException("Barcode se product nahi mila"));
+        if (productData.getQuantity() == null || productData.getQuantity() <= 0
+                || isDirectBillOnlyProduct(productData)) {
+            throw new RuntimeException("Is barcode ka stock available nahi hai");
+        }
+        return ensureProductCodes(productData, resolveCodePrefix(productData));
+    }
+
     // Get Product By Id
     public product getProductById(Long id) {
         return productRepository.findById(id)

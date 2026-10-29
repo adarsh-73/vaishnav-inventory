@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
+import { QRCodeSVG } from "qrcode.react";
 
 function Products() {
   const navigate = useNavigate();
@@ -8,6 +9,7 @@ function Products() {
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
   const [highlightProductId, setHighlightProductId] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -54,9 +56,10 @@ function Products() {
 
   const filteredProducts = useMemo(() => {
     const text = query.trim().toLowerCase();
-    let nextProducts = lowStockOnly
-      ? products.filter((product) => Number(product.quantity || 0) <= Number(product.minimumStock || 1))
-      : products;
+    let nextProducts = showOutOfStock ? products : products.filter((product) => Number(product.quantity || 0) > 0);
+    if (lowStockOnly) {
+      nextProducts = nextProducts.filter((product) => Number(product.quantity || 0) <= Number(product.minimumStock || 1));
+    }
 
     if (!text) return nextProducts;
 
@@ -76,7 +79,7 @@ function Products() {
         .toLowerCase()
         .includes(text)
     );
-  }, [products, query, lowStockOnly]);
+  }, [products, query, lowStockOnly, showOutOfStock]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -192,6 +195,9 @@ function Products() {
         <button type="button" onClick={() => setLowStockOnly(!lowStockOnly)} style={lowStockOnly ? activeFilterBtn : secondaryBtn}>
           {lowStockOnly ? "Low Stock: ON" : "Low Stock Only"}
         </button>
+        <button type="button" onClick={() => setShowOutOfStock(!showOutOfStock)} style={showOutOfStock ? activeFilterBtn : secondaryBtn}>
+          {showOutOfStock ? "Out of Stock: Shown" : "Show Out of Stock"}
+        </button>
         <span style={{ marginLeft: "10px", color: "#64748b" }}>{loading ? "Loading..." : `${filteredProducts.length} product found`}</span>
 
         <table className="responsive-table product-table" style={tableStyle}>
@@ -219,7 +225,10 @@ function Products() {
                     <div style={mutedText}>{product.brand || product.category || "-"}</div>
                   </td>
                   <td data-label="Make / Model" style={tdStyle}>{product.make || "-"} / {product.model || "-"}</td>
-                  <td data-label="SR / Barcode" style={tdStyle}>{product.serialNumber || product.barcode || "-"}</td>
+                  <td data-label="SR / Barcode" style={tdStyle}>
+                    {product.serialNumber || product.barcode || "-"}
+                    {product.barcode && <div style={{ marginTop: 6 }}><QRCodeSVG value={product.barcode} size={72} level="M" /><div style={mutedText}>{product.barcode}</div></div>}
+                  </td>
                   <td data-label="Stock" style={tdStyle}>{product.quantity ?? 0}</td>
                   <td data-label="Min" style={tdStyle}>{product.minimumStock ?? 1}</td>
                   <td data-label="Buy" style={tdStyle}>Rs. {product.purchasePrice ?? 0}</td>

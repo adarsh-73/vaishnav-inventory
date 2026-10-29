@@ -30,6 +30,8 @@ export default function VaishnavFinalInvoice() {
   const [newItemMode, setNewItemMode] = useState("manual_accessory");
   const [editingItemId, setEditingItemId] = useState(null);
   const [backendProducts, setBackendProducts] = useState([]);
+  const [scanCode, setScanCode] = useState("");
+  const [lastScannedProduct, setLastScannedProduct] = useState(null);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -38,7 +40,7 @@ export default function VaishnavFinalInvoice() {
 
   const loadBackendProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE}/products/options`);
+      const response = await fetch(`${API_BASE}/products/available`);
       if (!response.ok) throw new Error("Products API failed");
       const data = await response.json();
       setBackendProducts(Array.isArray(data) ? data : []);
@@ -440,6 +442,41 @@ export default function VaishnavFinalInvoice() {
     setNewRate(product.sellPrice || "");
   };
 
+  const handleBarcodeScan = async (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const code = scanCode.trim();
+    if (!code) return;
+    setScanCode("");
+
+    try {
+      const response = await fetch(`${API_BASE}/products/barcode/${encodeURIComponent(code)}`);
+      if (!response.ok) throw new Error(await response.text() || "Barcode nahi mila ya stock khatam hai.");
+      const product = await response.json();
+      const alreadyAdded = items
+        .filter((item) => String(item.productId) === String(product.id))
+        .reduce((sum, item) => sum + Number(item.qty || 0), 0);
+      if (alreadyAdded >= Number(product.quantity || 0)) {
+        setLastScannedProduct({ error: `${product.productName}: available stock ${product.quantity || 0} hi hai.` });
+        return;
+      }
+
+      setItems((current) => {
+        const existing = current.find((item) => String(item.productId) === String(product.id));
+        if (existing) return current.map((item) => item === existing ? { ...item, qty: Number(item.qty || 0) + 1 } : item);
+        return [...current, {
+          id: Date.now(), productId: product.id, desc: product.productName,
+          identity: getProductIdentity(product), category: "accessories", itemCategory: "inventory_accessory",
+          qty: 1, rate: Number(product.sellPrice || 0), purchasePrice: Number(product.purchasePrice || 0),
+          autoCreateProduct: false
+        }];
+      });
+      setLastScannedProduct(product);
+    } catch (error) {
+      setLastScannedProduct({ error: error.message || `Barcode ${code} nahi mila ya stock khatam hai.` });
+    }
+  };
+
   return (
     <div className="billing-page-shell" style={{ background: '#f1f5f9', minHeight: '100vh', padding: '30px 0', fontFamily: 'Arial, sans-serif', overflowY: 'auto' }}>
       <style>{`
@@ -531,6 +568,14 @@ export default function VaishnavFinalInvoice() {
           <span>Detected: {getInvoiceBusinessCategory({ items })}</span>
         </div>
         <form className="billing-entry-form" onSubmit={handleAddItem} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <input
+            type="text" inputMode="none" autoComplete="off" placeholder="Scan barcode, then press Enter"
+            value={scanCode} onChange={(event) => setScanCode(event.target.value)} onKeyDown={handleBarcodeScan}
+            style={{ ...styles.panelInput, flexBasis: '100%', borderColor: '#128c7e' }}
+          />
+          {lastScannedProduct && <div className="no-print" style={{ flexBasis: '100%', color: lastScannedProduct.error ? '#b91c1c' : '#166534', paddingBottom: 6 }}>
+            {lastScannedProduct.error || `Scanned: ${lastScannedProduct.productName} | Available ${lastScannedProduct.quantity} | Buy cost (internal): ₹ ${lastScannedProduct.purchasePrice ?? 0} | Sell: ₹ ${lastScannedProduct.sellPrice ?? 0}`}
+          </div>}
           <select value={newItemMode} onChange={e => {
             setNewItemMode(e.target.value);
             if (e.target.value !== "inventory") {
