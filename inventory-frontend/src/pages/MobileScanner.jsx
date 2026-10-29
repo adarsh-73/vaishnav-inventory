@@ -12,6 +12,8 @@ export default function MobileScanner() {
   });
   const [manualCode, setManualCode] = useState("");
   const [product, setProduct] = useState(null);
+  const [scannedCode, setScannedCode] = useState("");
+  const [showSellPrice, setShowSellPrice] = useState(false);
   const [productCache, setProductCache] = useState(() => {
     try { return JSON.parse(localStorage.getItem("vaishnav_product_scan_cache") || "[]"); }
     catch { return []; }
@@ -52,6 +54,8 @@ export default function MobileScanner() {
     const barcode = String(rawCode || "").trim();
     if (!barcode) return;
     const scanSequence = ++scanSequenceRef.current;
+    setScannedCode(barcode);
+    setShowSellPrice(false);
     const cachedProduct = productCacheRef.current.find((row) => String(row.barcode || "").trim().toLowerCase() === barcode.toLowerCase());
     if (cachedProduct) {
       setProduct(cachedProduct);
@@ -68,8 +72,19 @@ export default function MobileScanner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stationToken, barcode })
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || result.error || "Product nahi mila ya stock khatam hai.");
+      let result = await response.json().catch(() => ({}));
+      if (!response.ok && (response.status === 404 || response.status === 405)) {
+        const fallbackResponse = await fetch(`${API_BASE}/products/barcode/${encodeURIComponent(barcode)}`);
+        if (fallbackResponse.ok) result = { product: await fallbackResponse.json(), available: true, addedToBill: false };
+      }
+      if (!result.product) {
+        const reason = result.message || result.error || `Backend status ${response.status}`;
+        if (cachedProduct?.id) {
+          const savedResponse = await fetch(`${API_BASE}/products/${cachedProduct.id}`);
+          if (savedResponse.ok) result = { product: await savedResponse.json(), available: Number(cachedProduct.quantity) > 0, addedToBill: false };
+        }
+        if (!result.product) throw new Error(`${reason}. Barcode read: ${barcode}`);
+      }
       const latestProduct = result.product;
       const updatedCache = [...productCacheRef.current.filter((row) => String(row.barcode) !== String(latestProduct.barcode)), latestProduct];
       productCacheRef.current = updatedCache;
@@ -177,10 +192,11 @@ export default function MobileScanner() {
 
         {product && <article style={styles.productCard}>
           <div style={styles.productName}>{product.productName}</div>
-          <div style={styles.price}>Sell price: ₹ {Number(product.sellPrice || 0).toLocaleString("en-IN")}</div>
+          <button type="button" onClick={() => setShowSellPrice((visible) => !visible)} style={styles.priceToggle}>{showSellPrice ? "Hide sell price" : "Show sell price (owner only)"}</button>
+          {showSellPrice && <div style={styles.price}>₹ {Number(product.sellPrice || 0).toLocaleString("en-IN")}</div>}
           <div style={styles.stock}>Available quantity: {product.quantity ?? 0}</div>
           <p style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{product.description || product.productName}</p>
-          <div style={styles.code}>Code: {product.barcode}</div>
+          <div style={styles.code}>Scanned barcode: {scannedCode}</div>
         </article>}
       </section>
     </main>
@@ -206,6 +222,7 @@ const styles = {
   productCard: { marginTop: 16, padding: 16, border: "1px solid #bbf7d0", background: "#f0fdf4", borderRadius: 12, color: "#14532d" },
   productName: { fontSize: 19, fontWeight: 700 },
   price: { fontSize: 22, fontWeight: 800, marginTop: 8 },
+  priceToggle: { marginTop: 10, border: "1px solid #14532d", borderRadius: 8, padding: "9px 12px", background: "white", color: "#14532d", fontWeight: 700 },
   stock: { marginTop: 6 },
   code: { color: "#64748b", marginTop: 10, fontSize: 12 }
 };
