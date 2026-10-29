@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiRequest } from "../utils/api";
+import JsBarcode from "jsbarcode";
 
 function Purchase() {
   const [searchParams] = useSearchParams();
@@ -13,6 +14,8 @@ function Purchase() {
   const [importRows, setImportRows] = useState([]);
   const [importBillNumber, setImportBillNumber] = useState("");
   const [importSaving, setImportSaving] = useState(false);
+  const [billPhotoCount, setBillPhotoCount] = useState(0);
+  const [savedBarcodeProducts, setSavedBarcodeProducts] = useState([]);
   const [ocrLanguage, setOcrLanguage] = useState("eng");
   const [form, setForm] = useState({ productId: "", qty: "", price: "", invoiceNumber: "" });
 
@@ -72,8 +75,6 @@ function Purchase() {
     if (!file) return;
     setBillImageBusy(true);
     setBillImageStatus("Photo se text padh rahe hain. Pehli baar language model load hone mein thoda waqt lag sakta hai...");
-    setOcrText("");
-    setImportRows([]);
     let worker;
     try {
       const { createWorker } = await import("tesseract.js");
@@ -86,12 +87,14 @@ function Purchase() {
       });
       const result = await worker.recognize(file);
       const text = result.data.text || "";
-      setOcrText(text);
+      const pageNumber = billPhotoCount + 1;
       const parsedRows = parseBillLines(text, products);
-      setImportRows(parsedRows);
+      setOcrText((current) => `${current}${current ? "\n\n" : ""}--- BILL PAGE ${pageNumber} ---\n${text}`);
+      setImportRows((current) => [...current, ...parsedRows]);
+      setBillPhotoCount(pageNumber);
       setBillImageStatus(parsedRows.length
-        ? `${parsedRows.length} possible item lines mili hain. Save se pehle naam, quantity, buy price aur sell price check karein.`
-        : "Text padha, lekin item rows apne aap identify nahi hui. Neeche text dekhkar items manually add karein.");
+        ? `Page ${pageNumber}: ${parsedRows.length} possible item lines mili. Is bill mein ab tak ${importRows.length + parsedRows.length} rows hain. Agla page bhi photo le sakte hain; save se pehle sab verify karein.`
+        : `Page ${pageNumber} ka text padha, par item rows identify nahi hui. Agla page lein ya text edit karke reparse karein.`);
     } catch (error) {
       setBillImageStatus(`Photo read nahi hui: ${error.message || "Image clear karke dobara try karein."}`);
     } finally {
@@ -115,20 +118,37 @@ function Purchase() {
   const addImportRow = () => {
     setImportRows((current) => [...current, {
       id: `manual-${Date.now()}-${Math.random()}`, productId: "", productName: "", quantity: "1",
-      purchasePrice: "", sellPrice: ""
+      purchasePrice: "", sellPrice: "", barcode: ""
     }]);
+  };
+
+  const generateImportBarcode = (row) => {
+    const randomPart = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().replace(/-/g, "").slice(0, 14).toUpperCase()
+      : `${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    updateImportRow(row.id, { barcode: `VN-${randomPart}` });
+  };
+
+  const generateAllImportBarcodes = () => {
+    setImportRows((current) => current.map((row) => {
+      if (row.productId || row.barcode) return row;
+      const randomPart = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID().replace(/-/g, "").slice(0, 14).toUpperCase()
+        : `${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      return { ...row, barcode: `VN-${randomPart}` };
+    }));
   };
 
   const saveImportedBill = async () => {
     if (!importRows.length) return alert("Save karne ke liye bill item add karein.");
     const invalidRow = importRows.find((row) => !Number(row.quantity) || Number(row.quantity) <= 0
       || row.purchasePrice === "" || Number(row.purchasePrice) < 0
-      || (!row.productId && (!row.productName.trim() || !Number(row.sellPrice) || Number(row.sellPrice) <= 0)));
-    if (invalidRow) return alert("Har row ka product, quantity, buy price aur naye product ka sell price verify karein.");
+      || (!row.productId && (!row.productName.trim() || !Number(row.sellPrice) || Number(row.sellPrice) <= 0 || !row.barcode)));
+    if (invalidRow) return alert("Har row ka naam, quantity, buy price, sell price bharein aur naye product ka barcode generate karein.");
 
     setImportSaving(true);
     try {
-      await apiRequest("/purchases/import", {
+      const saved = await apiRequest("/purchases/import", {
         method: "POST",
         body: JSON.stringify(importRows.map((row) => ({
           productId: row.productId ? Number(row.productId) : null,
@@ -136,12 +156,15 @@ function Purchase() {
           quantity: Number(row.quantity),
           purchasePrice: Number(row.purchasePrice),
           sellPrice: Number(row.sellPrice) > 0 ? Number(row.sellPrice) : null,
+          barcode: row.productId ? null : (row.barcode || null),
           invoiceNumber: importBillNumber || null
         })))
       });
+      setSavedBarcodeProducts((Array.isArray(saved) ? saved : []).map((purchase) => purchase.productdata).filter((product) => product?.barcode));
       setImportRows([]);
       setOcrText("");
       setImportBillNumber("");
+      setBillPhotoCount(0);
       setBillImageStatus("Bill items inventory mein add ho gaye; stock aur purchase history update ho gayi.");
       await loadData();
     } catch (error) {
@@ -162,20 +185,21 @@ function Purchase() {
           <option value="eng+hin">Bill language: English + Hindi</option>
         </select>
         <label style={primaryBtn}>
-          {billImageBusy ? "Photo read ho rahi hai..." : "📷 Bill ki photo lein / upload karein"}
+          {billImageBusy ? "Photo read ho rahi hai..." : `📷 ${billPhotoCount ? `Agla bill page lein (${billPhotoCount} liye)` : "Bill ki pehli photo lein / upload karein"}`}
           <input ref={billPhotoInputRef} type="file" accept="image/*" capture="environment" onChange={handleBillPhoto} disabled={billImageBusy} style={{ display: "none" }} />
         </label>
         {billImageStatus && <div style={{ margin: "14px 0", color: "#334155" }}>{billImageStatus}</div>}
         {(ocrText || importRows.length > 0) && <>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
             <input placeholder="Supplier bill no (optional)" value={importBillNumber} onChange={(e) => setImportBillNumber(e.target.value)} style={inputStyle} />
-            <button type="button" onClick={reparseBillText} style={secondaryBtn}>Text dobara parse karein</button>
+            <button type="button" onClick={reparseBillText} style={secondaryBtn}>Saare pages dobara parse karein</button>
             <button type="button" onClick={addImportRow} style={secondaryBtn}>+ Add item</button>
+            <button type="button" onClick={generateAllImportBarcodes} style={secondaryBtn}>Generate all new item barcodes</button>
           </div>
           <textarea value={ocrText} onChange={(e) => setOcrText(e.target.value)} placeholder="OCR se nikla text; zarurat pade toh edit karke reparse karein" style={{ ...inputStyle, width: "100%", minHeight: 100, boxSizing: "border-box" }} />
           {importRows.length > 0 && <>
             <div style={{ overflowX: "auto" }}><table style={tableStyle}>
-              <thead><tr><th style={thStyle}>Existing / New product</th><th style={thStyle}>Description</th><th style={thStyle}>Qty</th><th style={thStyle}>Buy price</th><th style={thStyle}>Sell price</th><th style={thStyle}>Remove</th></tr></thead>
+              <thead><tr><th style={thStyle}>Existing / New product</th><th style={thStyle}>Description</th><th style={thStyle}>Qty</th><th style={thStyle}>Buy price / unit</th><th style={thStyle}>Sell price / unit</th><th style={thStyle}>Barcode</th><th style={thStyle}>Remove</th></tr></thead>
               <tbody>{importRows.map((row) => {
                 const selected = products.find((product) => String(product.id) === String(row.productId));
                 return <tr key={row.id}>
@@ -187,6 +211,7 @@ function Purchase() {
                   <td style={tdStyle}><input type="number" min="1" value={row.quantity} onChange={(e) => updateImportRow(row.id, { quantity: e.target.value })} style={inputStyle} /></td>
                   <td style={tdStyle}><input type="number" min="0" step="0.01" value={row.purchasePrice} onChange={(e) => updateImportRow(row.id, { purchasePrice: e.target.value })} style={inputStyle} /></td>
                   <td style={tdStyle}><input type="number" min="0" step="0.01" placeholder={selected ? String(selected.sellPrice || "") : "Required for new"} value={row.sellPrice} onChange={(e) => updateImportRow(row.id, { sellPrice: e.target.value })} style={inputStyle} /></td>
+                  <td style={tdStyle}>{selected?.barcode || row.barcode ? <><Code128Barcode value={selected?.barcode || row.barcode} /><div style={{ fontSize: 11 }}>{selected?.barcode || row.barcode}</div></> : <button type="button" onClick={() => generateImportBarcode(row)} style={secondaryBtn}>Generate barcode</button>}</td>
                   <td style={tdStyle}><button type="button" onClick={() => setImportRows((current) => current.filter((entry) => entry.id !== row.id))} style={dangerBtn}>Remove</button></td>
                 </tr>;
               })}</tbody>
@@ -194,6 +219,17 @@ function Purchase() {
             <button type="button" onClick={saveImportedBill} disabled={importSaving} style={{ ...primaryBtn, marginTop: 12, opacity: importSaving ? 0.65 : 1 }}>{importSaving ? "Saving..." : `Verify karke ${importRows.length} item save karein`}</button>
           </>}
         </>}
+        {savedBarcodeProducts.length > 0 && <div style={{ ...panelStyle, marginTop: 16, border: "1px solid #86efac" }}>
+          <style>{`@media print { body * { visibility: hidden !important; } .import-labels-print, .import-labels-print * { visibility: visible !important; } .import-labels-print { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; display: grid !important; grid-template-columns: repeat(3, 1fr) !important; } }`}</style>
+          <h3 style={{ color: "#166534" }}>Products saved with barcode</h3>
+          <p>In labels ko print karke products par chipkayein. Sell price product record mein save hai.</p>
+          <div className="import-labels-print" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 12 }}>
+            {savedBarcodeProducts.map((product, index) => <div key={`${product.id}-${index}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, textAlign: "center" }}>
+              <strong>{product.productName}</strong><Code128Barcode value={product.barcode} /><div>{product.barcode}</div><div>Sell: ₹ {product.sellPrice}</div>
+            </div>)}
+          </div>
+          <button type="button" onClick={() => window.print()} style={{ ...primaryBtn, marginTop: 12 }}>Print barcode labels</button>
+        </div>}
       </section>
       <form onSubmit={handlePurchase} style={panelStyle}>
         <select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })} style={inputStyle}>
@@ -247,23 +283,33 @@ const tdStyle = { padding: "10px", borderBottom: "1px solid #e2e8f0" };
 
 export default Purchase;
 
+function Code128Barcode({ value }) {
+  const svgRef = useRef(null);
+  useEffect(() => {
+    if (svgRef.current && value) JsBarcode(svgRef.current, String(value), { format: "CODE128", displayValue: true, height: 38, margin: 4, fontSize: 11, width: 1.3 });
+  }, [value]);
+  return <svg ref={svgRef} role="img" aria-label={`Barcode ${value}`} style={{ maxWidth: 190, width: "100%", height: "auto", display: "block", margin: "6px auto" }} />;
+}
+
 function parseBillLines(text, products) {
   const parsed = [];
   const ignored = /^(?:invoice|bill|date|gst|tax|total|subtotal|amount|description|item|qty|quantity|rate|price|page|phone|mobile|address|customer|supplier|terms|thank)/i;
   for (const [index, rawLine] of String(text || "").split(/\r?\n/).entries()) {
-    const line = rawLine.replace(/[|]/g, " ").replace(/\s+/g, " ").trim().replace(/^\d+\s*[.)-]\s*/, "");
+    const line = rawLine.replace(/[|]/g, " ").replace(/\s+/g, " ").trim()
+      .replace(/^\d{1,3}\s*[.)-]\s*/, "").replace(/^\d{1,3}\s+(?=[\p{L}])/u, "");
     if (!line || ignored.test(line)) continue;
     const numbers = [...line.matchAll(/\d[\d,]*(?:\.\d{1,2})?/g)];
     if (numbers.length < 2) continue;
-    const firstNumber = numbers[0];
-    const description = line.slice(0, firstNumber.index)
+    const quantityIndex = numbers.length >= 3 ? numbers.length - 3 : numbers.length - 2;
+    const priceIndex = numbers.length >= 3 ? numbers.length - 2 : numbers.length - 1;
+    const description = line.slice(0, numbers[quantityIndex].index)
       .replace(/^\s*\d+\s*[.)-]?\s*/, "")
       .replace(/[^\p{L}\p{N}#/+(). -]/gu, " ")
       .replace(/\s+/g, " ").trim();
     if (description.length < 2 || ignored.test(description)) continue;
     const values = numbers.map((match) => Number(match[0].replace(/,/g, ""))).filter(Number.isFinite);
-    const qty = values.length >= 3 ? values[values.length - 3] : values[values.length - 2];
-    const buyPrice = values.length >= 3 ? values[values.length - 2] : values[values.length - 1];
+    const qty = values[quantityIndex];
+    const buyPrice = values[priceIndex];
     if (!(qty > 0 && qty <= 100000 && buyPrice >= 0 && buyPrice < 100000000)) continue;
     const match = products.find((product) => String(product.productName || "").trim().toLowerCase() === description.toLowerCase());
     parsed.push({

@@ -40,8 +40,14 @@ public class PurchaseService {
         ).orElseThrow(() -> new RuntimeException("Product not found"));
 
         // STOCK INCREASE
-        productData.setQuantity((productData.getQuantity() == null ? 0 : productData.getQuantity()) + purchase.getQuantity());
-        productData.setPurchasePrice(purchase.getPurchasePrice() == null ? 0 : purchase.getPurchasePrice());
+        int oldQuantity = productData.getQuantity() == null ? 0 : productData.getQuantity();
+        int receivedQuantity = purchase.getQuantity() == null ? 0 : purchase.getQuantity();
+        double oldUnitCost = productData.getPurchasePrice() == null ? 0 : productData.getPurchasePrice();
+        double receivedUnitCost = purchase.getPurchasePrice() == null ? 0 : purchase.getPurchasePrice();
+        int newQuantity = oldQuantity + receivedQuantity;
+        productData.setQuantity(newQuantity);
+        productData.setPurchasePrice(newQuantity == 0 ? receivedUnitCost
+                : ((oldQuantity * oldUnitCost) + (receivedQuantity * receivedUnitCost)) / newQuantity);
         productRepository.save(productData);
 
         // STOCK HISTORY
@@ -94,6 +100,7 @@ public class PurchaseService {
                 newProduct.setMinimumStock(1);
                 newProduct.setSellPrice(line.getSellPrice());
                 newProduct.setPurchasePrice(line.getPurchasePrice());
+                newProduct.setBarcode(line.getBarcode());
                 productData = productService.addProduct(newProduct);
             }
 
@@ -113,6 +120,7 @@ public class PurchaseService {
         private Integer quantity;
         private Double purchasePrice;
         private Double sellPrice;
+        private String barcode;
         private String invoiceNumber;
 
         public Long getProductId() { return productId; }
@@ -125,6 +133,8 @@ public class PurchaseService {
         public void setPurchasePrice(Double purchasePrice) { this.purchasePrice = purchasePrice; }
         public Double getSellPrice() { return sellPrice; }
         public void setSellPrice(Double sellPrice) { this.sellPrice = sellPrice; }
+        public String getBarcode() { return barcode; }
+        public void setBarcode(String barcode) { this.barcode = barcode; }
         public String getInvoiceNumber() { return invoiceNumber; }
         public void setInvoiceNumber(String invoiceNumber) { this.invoiceNumber = invoiceNumber; }
     }
