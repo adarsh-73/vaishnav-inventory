@@ -1,11 +1,19 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiRequest } from "../utils/api";
 
 function Purchase() {
   const [searchParams] = useSearchParams();
+  const billPhotoInputRef = useRef(null);
   const [products, setProducts] = useState([]);
   const [purchases, setPurchases] = useState([]);
+  const [billImageBusy, setBillImageBusy] = useState(false);
+  const [billImageStatus, setBillImageStatus] = useState("");
+  const [ocrText, setOcrText] = useState("");
+  const [importRows, setImportRows] = useState([]);
+  const [importBillNumber, setImportBillNumber] = useState("");
+  const [importSaving, setImportSaving] = useState(false);
+  const [ocrLanguage, setOcrLanguage] = useState("eng");
   const [form, setForm] = useState({ productId: "", qty: "", price: "", invoiceNumber: "" });
 
   const loadData = async () => {
@@ -30,6 +38,12 @@ function Purchase() {
     if (productId) setForm((current) => ({ ...current, productId }));
   }, [searchParams]);
 
+  useEffect(() => {
+    if (searchParams.get("importPhoto") !== "1") return;
+    const timer = window.setTimeout(() => billPhotoInputRef.current?.click(), 350);
+    return () => window.clearTimeout(timer);
+  }, [searchParams]);
+
   const handlePurchase = async (event) => {
     event.preventDefault();
     if (!form.productId || !form.qty) return alert("Product aur quantity select karo.");
@@ -52,9 +66,135 @@ function Purchase() {
     }
   };
 
+  const handleBillPhoto = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setBillImageBusy(true);
+    setBillImageStatus("Photo se text padh rahe hain. Pehli baar language model load hone mein thoda waqt lag sakta hai...");
+    setOcrText("");
+    setImportRows([]);
+    let worker;
+    try {
+      const { createWorker } = await import("tesseract.js");
+      worker = await createWorker(ocrLanguage, 1, {
+        logger: (progress) => {
+          if (progress.status === "recognizing text") {
+            setBillImageStatus(`Bill padh rahe hain: ${Math.round((progress.progress || 0) * 100)}%`);
+          }
+        }
+      });
+      const result = await worker.recognize(file);
+      const text = result.data.text || "";
+      setOcrText(text);
+      const parsedRows = parseBillLines(text, products);
+      setImportRows(parsedRows);
+      setBillImageStatus(parsedRows.length
+        ? `${parsedRows.length} possible item lines mili hain. Save se pehle naam, quantity, buy price aur sell price check karein.`
+        : "Text padha, lekin item rows apne aap identify nahi hui. Neeche text dekhkar items manually add karein.");
+    } catch (error) {
+      setBillImageStatus(`Photo read nahi hui: ${error.message || "Image clear karke dobara try karein."}`);
+    } finally {
+      await worker?.terminate();
+      setBillImageBusy(false);
+    }
+  };
+
+  const reparseBillText = () => {
+    const rows = parseBillLines(ocrText, products);
+    setImportRows(rows);
+    setBillImageStatus(rows.length
+      ? `${rows.length} possible item lines parse hui hain. Har row verify karein.`
+      : "Koi item row identify nahi hui. Add item se manually row bana sakte hain.");
+  };
+
+  const updateImportRow = (rowId, updates) => {
+    setImportRows((current) => current.map((row) => row.id === rowId ? { ...row, ...updates } : row));
+  };
+
+  const addImportRow = () => {
+    setImportRows((current) => [...current, {
+      id: `manual-${Date.now()}-${Math.random()}`, productId: "", productName: "", quantity: "1",
+      purchasePrice: "", sellPrice: ""
+    }]);
+  };
+
+  const saveImportedBill = async () => {
+    if (!importRows.length) return alert("Save karne ke liye bill item add karein.");
+    const invalidRow = importRows.find((row) => !Number(row.quantity) || Number(row.quantity) <= 0
+      || row.purchasePrice === "" || Number(row.purchasePrice) < 0
+      || (!row.productId && (!row.productName.trim() || !Number(row.sellPrice) || Number(row.sellPrice) <= 0)));
+    if (invalidRow) return alert("Har row ka product, quantity, buy price aur naye product ka sell price verify karein.");
+
+    setImportSaving(true);
+    try {
+      await apiRequest("/purchases/import", {
+        method: "POST",
+        body: JSON.stringify(importRows.map((row) => ({
+          productId: row.productId ? Number(row.productId) : null,
+          productName: row.productId ? null : row.productName.trim(),
+          quantity: Number(row.quantity),
+          purchasePrice: Number(row.purchasePrice),
+          sellPrice: Number(row.sellPrice) > 0 ? Number(row.sellPrice) : null,
+          invoiceNumber: importBillNumber || null
+        })))
+      });
+      setImportRows([]);
+      setOcrText("");
+      setImportBillNumber("");
+      setBillImageStatus("Bill items inventory mein add ho gaye; stock aur purchase history update ho gayi.");
+      await loadData();
+    } catch (error) {
+      alert(`Bill import save nahi hua: ${error.message}`);
+    } finally {
+      setImportSaving(false);
+    }
+  };
+
   return (
     <div style={pageStyle}>
       <h1 style={titleStyle}>Purchase Entry</h1>
+      <section style={panelStyle}>
+        <h2 style={{ marginTop: 0, color: "#0f2963" }}>Supplier bill photo se items import karein</h2>
+        <p style={{ color: "#64748b" }}>Photo isi app mein process hoti hai. OCR galti kar sakta hai, isliye stock save karne se pehle har item verify karein.</p>
+        <select value={ocrLanguage} onChange={(e) => setOcrLanguage(e.target.value)} style={inputStyle} disabled={billImageBusy}>
+          <option value="eng">Bill language: English</option>
+          <option value="eng+hin">Bill language: English + Hindi</option>
+        </select>
+        <label style={primaryBtn}>
+          {billImageBusy ? "Photo read ho rahi hai..." : "📷 Bill ki photo lein / upload karein"}
+          <input ref={billPhotoInputRef} type="file" accept="image/*" capture="environment" onChange={handleBillPhoto} disabled={billImageBusy} style={{ display: "none" }} />
+        </label>
+        {billImageStatus && <div style={{ margin: "14px 0", color: "#334155" }}>{billImageStatus}</div>}
+        {(ocrText || importRows.length > 0) && <>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
+            <input placeholder="Supplier bill no (optional)" value={importBillNumber} onChange={(e) => setImportBillNumber(e.target.value)} style={inputStyle} />
+            <button type="button" onClick={reparseBillText} style={secondaryBtn}>Text dobara parse karein</button>
+            <button type="button" onClick={addImportRow} style={secondaryBtn}>+ Add item</button>
+          </div>
+          <textarea value={ocrText} onChange={(e) => setOcrText(e.target.value)} placeholder="OCR se nikla text; zarurat pade toh edit karke reparse karein" style={{ ...inputStyle, width: "100%", minHeight: 100, boxSizing: "border-box" }} />
+          {importRows.length > 0 && <>
+            <div style={{ overflowX: "auto" }}><table style={tableStyle}>
+              <thead><tr><th style={thStyle}>Existing / New product</th><th style={thStyle}>Description</th><th style={thStyle}>Qty</th><th style={thStyle}>Buy price</th><th style={thStyle}>Sell price</th><th style={thStyle}>Remove</th></tr></thead>
+              <tbody>{importRows.map((row) => {
+                const selected = products.find((product) => String(product.id) === String(row.productId));
+                return <tr key={row.id}>
+                  <td style={tdStyle}><select value={row.productId} onChange={(e) => {
+                    const found = products.find((product) => String(product.id) === e.target.value);
+                    updateImportRow(row.id, { productId: e.target.value, productName: found?.productName || row.productName, sellPrice: found?.sellPrice ? String(found.sellPrice) : row.sellPrice });
+                  }} style={inputStyle}><option value="">Create new product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.productName} (stock {product.quantity ?? 0})</option>)}</select></td>
+                  <td style={tdStyle}><input value={selected?.productName || row.productName} onChange={(e) => updateImportRow(row.id, { productId: "", productName: e.target.value })} style={inputStyle} /></td>
+                  <td style={tdStyle}><input type="number" min="1" value={row.quantity} onChange={(e) => updateImportRow(row.id, { quantity: e.target.value })} style={inputStyle} /></td>
+                  <td style={tdStyle}><input type="number" min="0" step="0.01" value={row.purchasePrice} onChange={(e) => updateImportRow(row.id, { purchasePrice: e.target.value })} style={inputStyle} /></td>
+                  <td style={tdStyle}><input type="number" min="0" step="0.01" placeholder={selected ? String(selected.sellPrice || "") : "Required for new"} value={row.sellPrice} onChange={(e) => updateImportRow(row.id, { sellPrice: e.target.value })} style={inputStyle} /></td>
+                  <td style={tdStyle}><button type="button" onClick={() => setImportRows((current) => current.filter((entry) => entry.id !== row.id))} style={dangerBtn}>Remove</button></td>
+                </tr>;
+              })}</tbody>
+            </table></div>
+            <button type="button" onClick={saveImportedBill} disabled={importSaving} style={{ ...primaryBtn, marginTop: 12, opacity: importSaving ? 0.65 : 1 }}>{importSaving ? "Saving..." : `Verify karke ${importRows.length} item save karein`}</button>
+          </>}
+        </>}
+      </section>
       <form onSubmit={handlePurchase} style={panelStyle}>
         <select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })} style={inputStyle}>
           <option value="">Select product</option>
@@ -99,8 +239,37 @@ const titleStyle = { margin: "0 0 20px", color: "#0f172a" };
 const panelStyle = { background: "white", padding: "18px", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.08)", marginBottom: "18px", overflowX: "auto" };
 const inputStyle = { padding: "11px", marginRight: "10px", marginBottom: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", minWidth: "190px" };
 const primaryBtn = { padding: "11px 18px", background: "#0f2963", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
+const secondaryBtn = { padding: "10px 14px", background: "#ffffff", color: "#0f2963", border: "1px solid #0f2963", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
+const dangerBtn = { padding: "8px 10px", background: "#dc2626", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" };
 const thStyle = { textAlign: "left", padding: "10px", background: "#0f2963", color: "white" };
 const tdStyle = { padding: "10px", borderBottom: "1px solid #e2e8f0" };
 
 export default Purchase;
+
+function parseBillLines(text, products) {
+  const parsed = [];
+  const ignored = /^(?:invoice|bill|date|gst|tax|total|subtotal|amount|description|item|qty|quantity|rate|price|page|phone|mobile|address|customer|supplier|terms|thank)/i;
+  for (const [index, rawLine] of String(text || "").split(/\r?\n/).entries()) {
+    const line = rawLine.replace(/[|]/g, " ").replace(/\s+/g, " ").trim().replace(/^\d+\s*[.)-]\s*/, "");
+    if (!line || ignored.test(line)) continue;
+    const numbers = [...line.matchAll(/\d[\d,]*(?:\.\d{1,2})?/g)];
+    if (numbers.length < 2) continue;
+    const firstNumber = numbers[0];
+    const description = line.slice(0, firstNumber.index)
+      .replace(/^\s*\d+\s*[.)-]?\s*/, "")
+      .replace(/[^\p{L}\p{N}#/+(). -]/gu, " ")
+      .replace(/\s+/g, " ").trim();
+    if (description.length < 2 || ignored.test(description)) continue;
+    const values = numbers.map((match) => Number(match[0].replace(/,/g, ""))).filter(Number.isFinite);
+    const qty = values.length >= 3 ? values[values.length - 3] : values[values.length - 2];
+    const buyPrice = values.length >= 3 ? values[values.length - 2] : values[values.length - 1];
+    if (!(qty > 0 && qty <= 100000 && buyPrice >= 0 && buyPrice < 100000000)) continue;
+    const match = products.find((product) => String(product.productName || "").trim().toLowerCase() === description.toLowerCase());
+    parsed.push({
+      id: `ocr-${index}-${Date.now()}`, productId: match ? String(match.id) : "", productName: match?.productName || description,
+      quantity: String(Math.trunc(qty)), purchasePrice: String(buyPrice), sellPrice: match?.sellPrice ? String(match.sellPrice) : ""
+    });
+  }
+  return parsed;
+}

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
 import { QRCodeSVG } from "qrcode.react";
+import JsBarcode from "jsbarcode";
 
 function Products() {
   const navigate = useNavigate();
@@ -10,10 +11,11 @@ function Products() {
   const [query, setQuery] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [barcodeProduct, setBarcodeProduct] = useState(null);
   const [highlightProductId, setHighlightProductId] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(emptyProductForm([]));
+  const [form, setForm] = useState(emptyProductForm());
 
   const loadProducts = async () => {
     setLoading(true);
@@ -34,15 +36,6 @@ function Products() {
   useEffect(() => {
     loadProducts();
   }, []);
-
-  useEffect(() => {
-    if (editingId) return;
-    setForm((current) => {
-      if (current.serialNumber || current.barcode) return current;
-      const nextCode = getNextProductCode(products);
-      return { ...current, serialNumber: nextCode, barcode: nextCode };
-    });
-  }, [editingId, products]);
 
   useEffect(() => {
     const lowStockParam = searchParams.get("lowStock");
@@ -108,8 +101,8 @@ function Products() {
       }
 
       setEditingId(null);
-      const freshProducts = await loadProducts();
-      setForm(emptyProductForm(freshProducts || products));
+      await loadProducts();
+      setForm(emptyProductForm());
       alert(editingId ? "Product update ho gaya." : "Product database me save ho gaya.");
     } catch (error) {
       alert(`Product save error: ${error.message}`);
@@ -138,7 +131,7 @@ function Products() {
 
   const cancelEdit = () => {
     setEditingId(null);
-    setForm(emptyProductForm(products));
+    setForm(emptyProductForm());
   };
 
   const handleDelete = async (product) => {
@@ -165,15 +158,18 @@ function Products() {
   return (
     <div style={pageStyle}>
       <h1 style={titleStyle}>Products & Stock Database</h1>
+      <button type="button" onClick={() => navigate("/purchase?importPhoto=1")} style={{ ...secondaryBtn, marginBottom: 14 }}>
+        📷 Supplier bill photo se products add karein
+      </button>
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         <input placeholder="Product name" value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} style={inputStyle} />
         <input placeholder="Brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} style={inputStyle} />
         <input placeholder="Make" value={form.make} onChange={(e) => setForm({ ...form, make: e.target.value })} style={inputStyle} />
         <input placeholder="Model" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} style={inputStyle} />
-        <input placeholder="SR No. (Auto)" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} style={inputStyle} />
+        <input placeholder="SR No. (Auto after save)" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} style={inputStyle} />
         <input placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} style={inputStyle} />
-        <input placeholder="Barcode (Auto)" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} style={inputStyle} />
+        <input placeholder="Barcode (Auto after save)" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} style={inputStyle} />
         <input type="number" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} style={inputStyle} />
         <input type="number" placeholder="Minimum stock" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: e.target.value })} style={inputStyle} />
         <input type="number" placeholder="Buy price / Cost price" value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })} style={inputStyle} />
@@ -227,7 +223,7 @@ function Products() {
                   <td data-label="Make / Model" style={tdStyle}>{product.make || "-"} / {product.model || "-"}</td>
                   <td data-label="SR / Barcode" style={tdStyle}>
                     {product.serialNumber || product.barcode || "-"}
-                    {product.barcode && <div style={{ marginTop: 6 }}><QRCodeSVG value={product.barcode} size={72} level="M" /><div style={mutedText}>{product.barcode}</div></div>}
+                    {product.barcode && <div style={{ marginTop: 6, textAlign: "center" }}><Code128Barcode value={product.barcode} width={150} /><QRCodeSVG value={product.barcode} size={60} level="M" /><div style={mutedText}>{product.barcode}</div></div>}
                   </td>
                   <td data-label="Stock" style={tdStyle}>{product.quantity ?? 0}</td>
                   <td data-label="Min" style={tdStyle}>{product.minimumStock ?? 1}</td>
@@ -236,6 +232,7 @@ function Products() {
                   <td data-label="Description" style={tdStyle}>{product.description || "-"}</td>
                   <td data-label="Action" style={tdStyle}>
                     <button onClick={() => handleEdit(product)} style={secondaryBtn}>Edit</button>
+                    <button onClick={() => setBarcodeProduct(product)} style={secondaryBtn}>QR Label</button>
                     <button onClick={() => handleAddStock(product)} style={stockBtn}>Add Stock</button>
                     <button onClick={() => handleDelete(product)} style={dangerBtn}>Delete</button>
                   </td>
@@ -245,20 +242,44 @@ function Products() {
           </tbody>
         </table>
       </div>
+      {barcodeProduct && <div style={labelOverlay}>
+        <style>{`@media print { body * { visibility: hidden !important; } .barcode-print-label, .barcode-print-label * { visibility: visible !important; } .barcode-print-label { position: fixed !important; left: 0 !important; top: 0 !important; width: 80mm !important; padding: 8mm !important; background: white !important; color: #111827 !important; } }`}</style>
+        <div className="barcode-print-label" style={labelCard}>
+          <button className="no-print" type="button" onClick={() => setBarcodeProduct(null)} style={{ ...dangerBtn, float: "right" }}>Close</button>
+          <h2 style={{ margin: "0 0 8px", color: "#0f2963" }}>{barcodeProduct.productName}</h2>
+          <Code128Barcode value={barcodeProduct.barcode} width={260} />
+          <QRCodeSVG value={barcodeProduct.barcode} size={150} level="H" />
+          <div style={{ fontWeight: 700, marginTop: 6 }}>Code: {barcodeProduct.barcode}</div>
+          {barcodeProduct.description && <p>{barcodeProduct.description}</p>}
+          <strong>Sell: ₹ {barcodeProduct.sellPrice ?? 0}</strong>
+          <div className="no-print" style={{ marginTop: 12 }}>
+            <button type="button" onClick={() => window.print()} style={primaryBtn}>Print QR Label</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
 
-function emptyProductForm(products) {
-  const nextCode = getNextProductCode(products);
+function Code128Barcode({ value, width = 220 }) {
+  const svgRef = React.useRef(null);
+  useEffect(() => {
+    if (svgRef.current && value) {
+      JsBarcode(svgRef.current, String(value), { format: "CODE128", displayValue: true, height: 44, margin: 6, fontSize: 13, width: 1.5 });
+    }
+  }, [value]);
+  return <svg ref={svgRef} role="img" aria-label={`Barcode ${value}`} style={{ maxWidth: width, width: "100%", height: "auto" }} />;
+}
+
+function emptyProductForm() {
   return {
     productName: "",
     brand: "",
     make: "",
     model: "",
-    serialNumber: nextCode,
+    serialNumber: "",
     category: "",
-    barcode: nextCode,
+    barcode: "",
     quantity: "",
     minimumStock: "1",
     purchasePrice: "",
@@ -266,16 +287,6 @@ function emptyProductForm(products) {
     productLocation: "",
     description: ""
   };
-}
-
-function getNextProductCode(products) {
-  const maxCode = (products || []).reduce((max, product) => {
-    const serial = Number(String(product.serialNumber || "").replace(/\D/g, ""));
-    const barcode = Number(String(product.barcode || "").replace(/\D/g, ""));
-    return Math.max(max, Number.isFinite(serial) ? serial : 0, Number.isFinite(barcode) ? barcode : 0);
-  }, 0);
-
-  return String(maxCode + 1);
 }
 
 const pageStyle = { padding: "30px", background: "#f1f5f9", minHeight: "100vh" };
@@ -294,5 +305,7 @@ const tdStyle = { padding: "10px", borderBottom: "1px solid #e2e8f0", verticalAl
 const mutedText = { color: "#64748b", fontSize: "12px", marginTop: "3px" };
 const lowStockRow = { background: "#fff7ed" };
 const highlightedRow = { background: "#fef3c7", outline: "2px solid #f59e0b", outlineOffset: "-2px" };
+const labelOverlay = { position: "fixed", inset: 0, zIndex: 1200, background: "rgba(15,23,42,.62)", display: "grid", placeItems: "center", padding: 16 };
+const labelCard = { width: "min(100%, 360px)", padding: 24, borderRadius: 14, background: "white", textAlign: "center", boxShadow: "0 16px 44px rgba(0,0,0,.2)" };
 
 export default Products;

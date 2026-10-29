@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { todayDate } from '../utils/storage';
 import { API_BASE, getInvoiceBusinessCategory, getInvoiceCategoryTotals, inferInvoiceItemCategory, isServiceText } from '../utils/api';
 import { printInvoiceElement } from '../utils/printInvoice';
 import { createInvoicePdf } from '../utils/invoicePdf';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function VaishnavFinalInvoice() {
   const navigate = useNavigate();
@@ -32,6 +33,10 @@ export default function VaishnavFinalInvoice() {
   const [backendProducts, setBackendProducts] = useState([]);
   const [scanCode, setScanCode] = useState("");
   const [lastScannedProduct, setLastScannedProduct] = useState(null);
+  const [showPhonePairing, setShowPhonePairing] = useState(false);
+  const [stationToken] = useState(getScannerStationToken);
+  const scanTimerRef = useRef(null);
+  const barcodeHandlerRef = useRef(null);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -442,16 +447,15 @@ export default function VaishnavFinalInvoice() {
     setNewRate(product.sellPrice || "");
   };
 
-  const handleBarcodeScan = async (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    const code = scanCode.trim();
+  const addBarcodeToBill = async (rawCode) => {
+    const code = String(rawCode || "").trim();
     if (!code) return;
-    setScanCode("");
-
     try {
       const response = await fetch(`${API_BASE}/products/barcode/${encodeURIComponent(code)}`);
-      if (!response.ok) throw new Error(await response.text() || "Barcode nahi mila ya stock khatam hai.");
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(details.replace(/<[^>]*>/g, " ").trim() || "Barcode nahi mila ya stock khatam hai.");
+      }
       const product = await response.json();
       const alreadyAdded = items
         .filter((item) => String(item.productId) === String(product.id))
@@ -476,6 +480,66 @@ export default function VaishnavFinalInvoice() {
       setLastScannedProduct({ error: error.message || `Barcode ${code} nahi mila ya stock khatam hai.` });
     }
   };
+
+  barcodeHandlerRef.current = addBarcodeToBill;
+
+  const handleBarcodeScan = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    window.clearTimeout(scanTimerRef.current);
+    const code = event.currentTarget.value.trim();
+    setScanCode("");
+    addBarcodeToBill(code);
+  };
+
+  const handleBarcodeInput = (event) => {
+    const code = event.target.value;
+    setScanCode(code);
+    window.clearTimeout(scanTimerRef.current);
+    if (code.trim()) {
+      // Keyboard-wedge scanners type a whole code; a short quiet period lets
+      // them work even when they do not send an Enter key after the scan.
+      scanTimerRef.current = window.setTimeout(() => {
+        setScanCode("");
+        barcodeHandlerRef.current?.(code);
+      }, 280);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const pollPhoneScans = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/scanner-bridge/billing/poll`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stationToken })
+        });
+        if (!response.ok || !active) return;
+        const result = await response.json();
+        for (const code of result.scans || []) {
+          if (!active) break;
+          await barcodeHandlerRef.current?.(code);
+        }
+      } catch {
+        // Keep the bill usable if the remote scan bridge is temporarily offline.
+      }
+    };
+
+    pollPhoneScans();
+    const intervalId = window.setInterval(pollPhoneScans, 1400);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      window.clearTimeout(scanTimerRef.current);
+      fetch(`${API_BASE}/scanner-bridge/billing/close`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stationToken }), keepalive: true
+      }).catch(() => {});
+    };
+  }, [stationToken]);
+
+  const phoneScannerUrl = `${window.location.origin}/mobile-scan?pair=${encodeURIComponent(stationToken)}`;
 
   return (
     <div className="billing-page-shell" style={{ background: '#f1f5f9', minHeight: '100vh', padding: '30px 0', fontFamily: 'Arial, sans-serif', overflowY: 'auto' }}>
@@ -543,8 +607,17 @@ export default function VaishnavFinalInvoice() {
             <button onClick={handlePrint} style={styles.printActionBtn}>Print Bill</button>
             <button onClick={handleDownloadPdf} style={styles.downloadActionBtn}>Download PDF</button>
             <button onClick={handleWhatsAppSend} style={styles.whatsappActionBtn}>WhatsApp Send</button>
+            <button type="button" onClick={() => setShowPhonePairing((open) => !open)} style={styles.downloadActionBtn}>📱 Phone Scanner</button>
           </div>
         </div>
+        {showPhonePairing && <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 16, padding: 14, marginBottom: 14, background: "#eff6ff", borderRadius: 10 }}>
+          <QRCodeSVG value={phoneScannerUrl} size={132} level="M" />
+          <div>
+            <strong style={{ color: "#0f2963" }}>Phone ko isi bill se connect karein</strong>
+            <p style={{ margin: "6px 0", color: "#475569" }}>Phone camera se QR scan karein, app kholein aur “Camera se scan karein” dabayein. Laptop par Billing khula rehna chahiye. Scanned item yahan bill mein add hoga.</p>
+            <a href={phoneScannerUrl} target="_blank" rel="noreferrer">Phone scanner link</a>
+          </div>
+        </div>}
         <div className="billing-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px', marginBottom: '12px' }}>
           <input type="text" placeholder="Customer Name" value={customerName} onChange={e => setCustomerName(e.target.value)} style={styles.panelInput} />
           <input type="text" placeholder="Mobile No" value={mobileNo} onChange={e => setMobileNo(e.target.value)} style={styles.panelInput} />
@@ -569,8 +642,8 @@ export default function VaishnavFinalInvoice() {
         </div>
         <form className="billing-entry-form" onSubmit={handleAddItem} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <input
-            type="text" inputMode="none" autoComplete="off" placeholder="Scan barcode, then press Enter"
-            value={scanCode} onChange={(event) => setScanCode(event.target.value)} onKeyDown={handleBarcodeScan}
+            type="text" inputMode="none" autoComplete="off" autoFocus placeholder="Scan barcode here; scan will add the item"
+            value={scanCode} onChange={handleBarcodeInput} onKeyDown={handleBarcodeScan}
             style={{ ...styles.panelInput, flexBasis: '100%', borderColor: '#128c7e' }}
           />
           {lastScannedProduct && <div className="no-print" style={{ flexBasis: '100%', color: lastScannedProduct.error ? '#b91c1c' : '#166534', paddingBottom: 6 }}>
@@ -894,6 +967,15 @@ export default function VaishnavFinalInvoice() {
 
     </div>
   );
+}
+
+function getScannerStationToken() {
+  let token = localStorage.getItem("vaishnav_scanner_station");
+  if (!token) {
+    token = window.crypto?.randomUUID?.() || `station-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    localStorage.setItem("vaishnav_scanner_station", token);
+  }
+  return token;
 }
 
 function uniqueInvoicesByNumber(invoiceList) {

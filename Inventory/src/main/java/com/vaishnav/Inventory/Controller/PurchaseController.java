@@ -35,4 +35,9 @@ public class PurchaseController {
     public Purchase addPurchase(@RequestBody Purchase purchase) {
         return purchaseService.addPurchase(purchase);
     }
+
+    @PostMapping("/import")
+    public List<Purchase> importBillLines(@RequestBody List<PurchaseService.PurchaseImportLine> lines) {
+        return purchaseService.importBillLines(lines);
+    }
 }
