@@ -225,7 +225,7 @@ function Purchase() {
           <p>In labels ko print karke products par chipkayein. Sell price product record mein save hai.</p>
           <div className="import-labels-print" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 12 }}>
             {savedBarcodeProducts.map((product, index) => <div key={`${product.id}-${index}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, textAlign: "center" }}>
-              <strong>{product.productName}</strong><Code128Barcode value={product.barcode} /><div>{product.barcode}</div><div>Sell: ₹ {product.sellPrice}</div>
+              <strong>{product.productName}</strong><Code128Barcode value={product.barcode} /><div>{product.barcode}</div>
             </div>)}
           </div>
           <button type="button" onClick={() => window.print()} style={{ ...primaryBtn, marginTop: 12 }}>Print barcode labels</button>

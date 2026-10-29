@@ -106,16 +106,17 @@ export default function MobileScanner() {
     }
     setMessage("Camera permission maang rahe hain...");
     try {
-      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const { BrowserMultiFormatOneDReader } = await import("@zxing/browser");
       const hints = new Map([
         [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]],
         [DecodeHintType.TRY_HARDER, true]
       ]);
-      const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 600 });
+      const reader = new BrowserMultiFormatOneDReader(hints, { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 600 });
       controlsRef.current = await reader.decodeFromConstraints({ video: {
         facingMode: { ideal: "environment" },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        width: { min: 640, ideal: 1920 },
+        height: { min: 480, ideal: 1080 },
+        aspectRatio: { ideal: 1.777 }
       } }, videoRef.current, (result) => {
         if (!result) return;
         const code = result.getText();
@@ -124,6 +125,11 @@ export default function MobileScanner() {
         lastScanRef.current = { code, at: now };
         submitCode(code);
       });
+      const cameraTrack = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+      const cameraCapabilities = cameraTrack?.getCapabilities?.();
+      if (cameraCapabilities?.focusMode?.includes("continuous")) {
+        cameraTrack.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+      }
       setCameraOn(true);
       setMessage("Camera ready hai. Product ka QR/barcode frame mein laaiye.");
     } catch (error) {
@@ -170,10 +176,10 @@ export default function MobileScanner() {
         {message && <div role="status" style={message.includes("nahi mila") || message.includes("nahi hua") ? styles.error : styles.status}>{message}</div>}
 
         {product && <article style={styles.productCard}>
-          <h2>{product.productName}</h2>
-          <p style={{ whiteSpace: "pre-wrap" }}>{product.description || product.productName}</p>
+          <div style={styles.productName}>{product.productName}</div>
           <div style={styles.price}>Sell price: ₹ {Number(product.sellPrice || 0).toLocaleString("en-IN")}</div>
-          <div style={styles.stock}>Available stock: {product.quantity ?? 0}</div>
+          <div style={styles.stock}>Available quantity: {product.quantity ?? 0}</div>
+          <p style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{product.description || product.productName}</p>
           <div style={styles.code}>Code: {product.barcode}</div>
         </article>}
       </section>
@@ -198,6 +204,7 @@ const styles = {
   cacheHint: { color: "#64748b", fontSize: 13, marginTop: 10 },
   error: { background: "#fff1f2", color: "#9f1239", padding: 12, borderRadius: 10, marginTop: 14 },
   productCard: { marginTop: 16, padding: 16, border: "1px solid #bbf7d0", background: "#f0fdf4", borderRadius: 12, color: "#14532d" },
+  productName: { fontSize: 19, fontWeight: 700 },
   price: { fontSize: 22, fontWeight: 800, marginTop: 8 },
   stock: { marginTop: 6 },
   code: { color: "#64748b", marginTop: 10, fontSize: 12 }

@@ -249,7 +249,6 @@ function Products() {
           <Code128Barcode value={barcodeProduct.barcode} width={340} height={72} />
           <div style={{ fontWeight: 700, marginTop: 6 }}>Code: {barcodeProduct.barcode}</div>
           {barcodeProduct.description && <p>{barcodeProduct.description}</p>}
-          <strong>Sell: ₹ {barcodeProduct.sellPrice ?? 0}</strong>
           <div className="no-print" style={{ marginTop: 12 }}>
             <button type="button" onClick={() => window.print()} style={primaryBtn}>Print Barcode Label</button>
           </div>
