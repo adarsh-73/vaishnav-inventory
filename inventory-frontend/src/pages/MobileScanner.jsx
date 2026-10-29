@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 
 export default function MobileScanner() {
   const [searchParams] = useSearchParams();
@@ -106,8 +107,16 @@ export default function MobileScanner() {
     setMessage("Camera permission maang rahe hain...");
     try {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
-      const reader = new BrowserMultiFormatReader();
-      controlsRef.current = await reader.decodeFromConstraints({ video: { facingMode: { ideal: "environment" } } }, videoRef.current, (result) => {
+      const hints = new Map([
+        [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]],
+        [DecodeHintType.TRY_HARDER, true]
+      ]);
+      const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 600 });
+      controlsRef.current = await reader.decodeFromConstraints({ video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      } }, videoRef.current, (result) => {
         if (!result) return;
         const code = result.getText();
         const now = Date.now();
@@ -137,7 +146,7 @@ export default function MobileScanner() {
       <section style={styles.card}>
         <div style={styles.brand}>VAISHNAV INVENTORY</div>
         <h1 style={styles.heading}>Mobile Product Scanner</h1>
-        <p style={styles.help}>QR scan karte hi saved product list se description aur price turant dikhegi. Backend se current price background mein refresh hoga. Laptop connected ho aur Billing khula ho toh item us bill mein add hoga.</p>
+        <p style={styles.help}>Line barcode ko camera frame ke beech mein seedha rakhein. Scan hote hi product description aur sell price dikh jayegi; Billing khuli aur paired ho toh item bill mein bhi judega.</p>
 
         <div style={styles.cacheHint}>{productCacheReady ? `${productCache.length} products scan ke liye ready` : "Product list background mein refresh ho rahi hai; saved products ki scan details available hain."}</div>
 
@@ -178,7 +187,7 @@ const styles = {
   brand: { color: "#b28a35", fontSize: 12, fontWeight: 800, letterSpacing: 1.5 },
   heading: { color: "#0f2963", margin: "8px 0" },
   help: { color: "#526074", lineHeight: 1.5 },
-  video: { width: "100%", maxHeight: 390, objectFit: "cover", background: "#111827", borderRadius: 12, margin: "14px 0" },
+  video: { width: "100%", maxHeight: 440, objectFit: "contain", background: "#111827", borderRadius: 12, margin: "14px 0" },
   actions: { display: "flex", gap: 10, margin: "14px 0" },
   primary: { flex: 1, border: 0, borderRadius: 10, padding: "14px 16px", background: "#0f2963", color: "white", fontWeight: 700, fontSize: 16 },
   secondary: { border: "1px solid #0f2963", borderRadius: 10, padding: "12px 16px", background: "white", color: "#0f2963", fontWeight: 700 },

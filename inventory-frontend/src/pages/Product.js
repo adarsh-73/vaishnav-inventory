@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
-import { QRCodeSVG } from "qrcode.react";
 import JsBarcode from "jsbarcode";
 
 function Products() {
@@ -223,7 +222,7 @@ function Products() {
                   <td data-label="Make / Model" style={tdStyle}>{product.make || "-"} / {product.model || "-"}</td>
                   <td data-label="SR / Barcode" style={tdStyle}>
                     {product.serialNumber || product.barcode || "-"}
-                    {product.barcode && <div style={{ marginTop: 6, textAlign: "center" }}><Code128Barcode value={product.barcode} width={150} /><QRCodeSVG value={product.barcode} size={60} level="M" /><div style={mutedText}>{product.barcode}</div></div>}
+                    {product.barcode && <div style={{ marginTop: 6, textAlign: "center" }}><Code128Barcode value={product.barcode} width={190} /><div style={mutedText}>{product.barcode}</div></div>}
                   </td>
                   <td data-label="Stock" style={tdStyle}>{product.quantity ?? 0}</td>
                   <td data-label="Min" style={tdStyle}>{product.minimumStock ?? 1}</td>
@@ -232,7 +231,7 @@ function Products() {
                   <td data-label="Description" style={tdStyle}>{product.description || "-"}</td>
                   <td data-label="Action" style={tdStyle}>
                     <button onClick={() => handleEdit(product)} style={secondaryBtn}>Edit</button>
-                    <button onClick={() => setBarcodeProduct(product)} style={secondaryBtn}>QR Label</button>
+                    <button onClick={() => setBarcodeProduct(product)} style={secondaryBtn}>Print Barcode</button>
                     <button onClick={() => handleAddStock(product)} style={stockBtn}>Add Stock</button>
                     <button onClick={() => handleDelete(product)} style={dangerBtn}>Delete</button>
                   </td>
@@ -247,13 +246,12 @@ function Products() {
         <div className="barcode-print-label" style={labelCard}>
           <button className="no-print" type="button" onClick={() => setBarcodeProduct(null)} style={{ ...dangerBtn, float: "right" }}>Close</button>
           <h2 style={{ margin: "0 0 8px", color: "#0f2963" }}>{barcodeProduct.productName}</h2>
-          <Code128Barcode value={barcodeProduct.barcode} width={260} />
-          <QRCodeSVG value={barcodeProduct.barcode} size={150} level="H" />
+          <Code128Barcode value={barcodeProduct.barcode} width={340} height={72} />
           <div style={{ fontWeight: 700, marginTop: 6 }}>Code: {barcodeProduct.barcode}</div>
           {barcodeProduct.description && <p>{barcodeProduct.description}</p>}
           <strong>Sell: ₹ {barcodeProduct.sellPrice ?? 0}</strong>
           <div className="no-print" style={{ marginTop: 12 }}>
-            <button type="button" onClick={() => window.print()} style={primaryBtn}>Print QR Label</button>
+            <button type="button" onClick={() => window.print()} style={primaryBtn}>Print Barcode Label</button>
           </div>
         </div>
       </div>}
@@ -261,13 +259,13 @@ function Products() {
   );
 }
 
-function Code128Barcode({ value, width = 220 }) {
+function Code128Barcode({ value, width = 220, height = 58 }) {
   const svgRef = React.useRef(null);
   useEffect(() => {
     if (svgRef.current && value) {
-      JsBarcode(svgRef.current, String(value), { format: "CODE128", displayValue: true, height: 44, margin: 6, fontSize: 13, width: 1.5 });
+      JsBarcode(svgRef.current, String(value), { format: "CODE128", displayValue: true, height, margin: 8, fontSize: 16, width: 2 });
     }
-  }, [value]);
+  }, [value, height]);
   return <svg ref={svgRef} role="img" aria-label={`Barcode ${value}`} style={{ maxWidth: width, width: "100%", height: "auto" }} />;
 }
 
