@@ -35,11 +35,12 @@ public class ScannerBridgeController {
         if (request.getBarcode() == null || request.getBarcode().isBlank()) {
             throw new IllegalArgumentException("Barcode scan nahi hua");
         }
-        product productData = productService.getAvailableProductByBarcode(request.getBarcode().trim());
+        product productData = productService.getProductByBarcode(request.getBarcode().trim());
         String stationToken = request.getStationToken();
-        boolean billingActive = stationToken != null && !stationToken.isBlank()
+        boolean inStock = productData.getQuantity() != null && productData.getQuantity() > 0;
+        boolean billingActive = inStock && stationToken != null && !stationToken.isBlank()
                 && scannerBridgeService.queueScanIfBillingOpen(stationToken, productData.getBarcode());
-        return Map.of("product", productData, "billingActive", billingActive, "addedToBill", billingActive);
+        return Map.of("product", productData, "available", inStock, "billingActive", billingActive, "addedToBill", billingActive);
     }
 
     public static class BridgeRequest {

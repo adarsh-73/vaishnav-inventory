@@ -71,11 +71,19 @@ public class ProductService {
     }
 
     public product getAvailableProductByBarcode(String barcode) {
-        product productData = productRepository.findByBarcode(barcode)
-                .orElseThrow(() -> new RuntimeException("Barcode se product nahi mila"));
+        product productData = getProductByBarcode(barcode);
         if (productData.getQuantity() == null || productData.getQuantity() <= 0
                 || isDirectBillOnlyProduct(productData)) {
             throw new RuntimeException("Is barcode ka stock available nahi hai");
+        }
+        return productData;
+    }
+
+    public product getProductByBarcode(String barcode) {
+        product productData = productRepository.findByBarcode(barcode)
+                .orElseThrow(() -> new RuntimeException("Barcode se product nahi mila"));
+        if (isDirectBillOnlyProduct(productData)) {
+            throw new RuntimeException("Is barcode ka product available nahi hai");
         }
         return ensureProductCodes(productData, resolveCodePrefix(productData));
     }

@@ -11,12 +11,35 @@ export default function MobileScanner() {
   });
   const [manualCode, setManualCode] = useState("");
   const [product, setProduct] = useState(null);
+  const [productCache, setProductCache] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("vaishnav_product_scan_cache") || "[]"); }
+    catch { return []; }
+  });
+  const [productCacheReady, setProductCacheReady] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const lastScanRef = useRef({ code: "", at: 0 });
+  const productCacheRef = useRef(productCache);
+  const scanSequenceRef = useRef(0);
+  const pendingRequestsRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${API_BASE}/products`)
+      .then((response) => { if (!response.ok) throw new Error("Product list unavailable"); return response.json(); })
+      .then((rows) => {
+        if (!active || !Array.isArray(rows)) return;
+        productCacheRef.current = rows;
+        setProductCache(rows);
+        localStorage.setItem("vaishnav_product_scan_cache", JSON.stringify(rows));
+        setProductCacheReady(true);
+      })
+      .catch(() => { if (active) setProductCacheReady(productCacheRef.current.length > 0); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => () => {
     controlsRef.current?.stop();
@@ -26,10 +49,18 @@ export default function MobileScanner() {
 
   const submitCode = async (rawCode) => {
     const barcode = String(rawCode || "").trim();
-    if (!barcode || busy) return;
+    if (!barcode) return;
+    const scanSequence = ++scanSequenceRef.current;
+    const cachedProduct = productCacheRef.current.find((row) => String(row.barcode || "").trim().toLowerCase() === barcode.toLowerCase());
+    if (cachedProduct) {
+      setProduct(cachedProduct);
+      setMessage("Product details turant dikhayi gayi; latest backend price check ho raha hai.");
+    } else {
+      setProduct(null);
+      setMessage("Product backend se check ho raha hai...");
+    }
+    pendingRequestsRef.current += 1;
     setBusy(true);
-    setProduct(null);
-    setMessage("Product dhoondh rahe hain...");
     try {
       const response = await fetch(`${API_BASE}/scanner-bridge/mobile/scan`, {
         method: "POST",
@@ -38,15 +69,32 @@ export default function MobileScanner() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || result.error || "Product nahi mila ya stock khatam hai.");
-      setProduct(result.product);
-      setMessage(result.addedToBill
-        ? "Laptop ke khule Billing bill mein add ho gaya."
-        : "Laptop se connection active nahi hai. Product ki details neeche dikh rahi hain; bill mein jodne ke liye laptop par Billing kholkar uska pairing QR scan karein.");
+      const latestProduct = result.product;
+      const updatedCache = [...productCacheRef.current.filter((row) => String(row.barcode) !== String(latestProduct.barcode)), latestProduct];
+      productCacheRef.current = updatedCache;
+      setProductCache(updatedCache);
+      localStorage.setItem("vaishnav_product_scan_cache", JSON.stringify(updatedCache));
+      if (scanSequence === scanSequenceRef.current) {
+        setProduct(latestProduct);
+        setMessage(result.addedToBill
+          ? "Latest backend price mil gaya; product laptop ke khule Billing bill mein add ho gaya."
+          : result.available === false
+            ? "Product details aur sell price dikh rahe hain, lekin stock zero hai—bill mein add nahi hua."
+            : "Latest backend price mil gaya. Laptop connected nahi hai; details yahin dikh rahi hain.");
+      }
       setManualCode("");
     } catch (error) {
-      setMessage(error.message || "Scan process nahi hua. Connection check karein.");
+      if (scanSequence === scanSequenceRef.current) {
+        if (cachedProduct) {
+          setProduct(cachedProduct);
+          setMessage("Network/backend abhi respond nahi kar raha; saved product details dikhayi hain. Bill mein bhejne ke liye connection chahiye.");
+        } else {
+          setMessage(error.message || "Scan process nahi hua. Connection check karein.");
+        }
+      }
     } finally {
-      setBusy(false);
+      pendingRequestsRef.current = Math.max(0, pendingRequestsRef.current - 1);
+      setBusy(pendingRequestsRef.current > 0);
     }
   };
 
@@ -89,7 +137,9 @@ export default function MobileScanner() {
       <section style={styles.card}>
         <div style={styles.brand}>VAISHNAV INVENTORY</div>
         <h1 style={styles.heading}>Mobile Product Scanner</h1>
-        <p style={styles.help}>Phone camera se product scan karein. Laptop connected ho aur Billing khula ho toh item us bill mein turant aa jayega. Connection na ho tab bhi product description aur sell price yahan dikhegi.</p>
+        <p style={styles.help}>QR scan karte hi saved product list se description aur price turant dikhegi. Backend se current price background mein refresh hoga. Laptop connected ho aur Billing khula ho toh item us bill mein add hoga.</p>
+
+        <div style={styles.cacheHint}>{productCacheReady ? `${productCache.length} products scan ke liye ready` : "Product list background mein refresh ho rahi hai; saved products ki scan details available hain."}</div>
 
         <div role="status" style={stationToken ? styles.connectedHint : styles.status}>
           {stationToken ? "Laptop pairing saved hai. Billing active hone par scan bill mein bheja jayega." : "Standalone mode: scan karne par product details dikhegi. Bill mein bhejne ke liye laptop ke Billing page ka pairing QR scan karein."}
@@ -112,7 +162,7 @@ export default function MobileScanner() {
 
         {product && <article style={styles.productCard}>
           <h2>{product.productName}</h2>
-          {product.description && <p style={{ whiteSpace: "pre-wrap" }}>{product.description}</p>}
+          <p style={{ whiteSpace: "pre-wrap" }}>{product.description || product.productName}</p>
           <div style={styles.price}>Sell price: ₹ {Number(product.sellPrice || 0).toLocaleString("en-IN")}</div>
           <div style={styles.stock}>Available stock: {product.quantity ?? 0}</div>
           <div style={styles.code}>Code: {product.barcode}</div>
@@ -136,6 +186,7 @@ const styles = {
   input: { minWidth: 0, flex: 1, border: "1px solid #cbd5e1", borderRadius: 10, padding: 12, fontSize: 16 },
   status: { background: "#eff6ff", color: "#1e3a8a", padding: 12, borderRadius: 10, marginTop: 14 },
   connectedHint: { background: "#f0fdf4", color: "#166534", padding: 12, borderRadius: 10, marginTop: 14 },
+  cacheHint: { color: "#64748b", fontSize: 13, marginTop: 10 },
   error: { background: "#fff1f2", color: "#9f1239", padding: 12, borderRadius: 10, marginTop: 14 },
   productCard: { marginTop: 16, padding: 16, border: "1px solid #bbf7d0", background: "#f0fdf4", borderRadius: 12, color: "#14532d" },
   price: { fontSize: 22, fontWeight: 800, marginTop: 8 },
