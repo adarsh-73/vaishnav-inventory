@@ -14,6 +14,9 @@ export default function MobileScanner() {
   const [product, setProduct] = useState(null);
   const [scannedCode, setScannedCode] = useState("");
   const [showSellPrice, setShowSellPrice] = useState(false);
+  const [unmatchedCode, setUnmatchedCode] = useState(false);
+  const [selectedLinkProduct, setSelectedLinkProduct] = useState("");
+  const [linkingCode, setLinkingCode] = useState(false);
   const [productCache, setProductCache] = useState(() => {
     try { return JSON.parse(localStorage.getItem("vaishnav_product_scan_cache") || "[]"); }
     catch { return []; }
@@ -55,7 +58,8 @@ export default function MobileScanner() {
     if (!barcode) return;
     const scanSequence = ++scanSequenceRef.current;
     setScannedCode(barcode);
-    setShowSellPrice(false);
+    setShowSellPrice(true);
+    setUnmatchedCode(false);
     const cachedProduct = productCacheRef.current.find((row) => String(row.barcode || "").trim().toLowerCase() === barcode.toLowerCase());
     if (cachedProduct) {
       setProduct(cachedProduct);
@@ -106,6 +110,7 @@ export default function MobileScanner() {
           setMessage("Network/backend abhi respond nahi kar raha; saved product details dikhayi hain. Bill mein bhejne ke liye connection chahiye.");
         } else {
           setMessage(error.message || "Scan process nahi hua. Connection check karein.");
+          setUnmatchedCode(/nahi mila|not found|does not exist/i.test(error.message || ""));
         }
       }
     } finally {
@@ -121,17 +126,23 @@ export default function MobileScanner() {
     }
     setMessage("Camera permission maang rahe hain...");
     try {
-      const { BrowserMultiFormatOneDReader } = await import("@zxing/browser");
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const hints = new Map([
-        [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]],
+        [DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.CODE_128, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_39,
+          BarcodeFormat.CODE_93, BarcodeFormat.ITF, BarcodeFormat.CODABAR,
+          BarcodeFormat.QR_CODE
+        ]],
         [DecodeHintType.TRY_HARDER, true]
       ]);
-      const reader = new BrowserMultiFormatOneDReader(hints, { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 600 });
+      const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 500 });
       controlsRef.current = await reader.decodeFromConstraints({ video: {
         facingMode: { ideal: "environment" },
         width: { min: 640, ideal: 1920 },
         height: { min: 480, ideal: 1080 },
-        aspectRatio: { ideal: 1.777 }
+        aspectRatio: { ideal: 1.777 },
+        focusMode: { ideal: "continuous" }
       } }, videoRef.current, (result) => {
         if (!result) return;
         const code = result.getText();
@@ -150,6 +161,30 @@ export default function MobileScanner() {
     } catch (error) {
       setCameraOn(false);
       setMessage(error.message || "Camera start nahi hua. Permission allow karke dobara try karein.");
+    }
+  };
+
+  const linkScannedCode = async () => {
+    if (!selectedLinkProduct || !scannedCode) return;
+    setLinkingCode(true);
+    try {
+      const response = await fetch(`${API_BASE}/products/${selectedLinkProduct}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ barcode: scannedCode })
+      });
+      if (!response.ok) throw new Error((await response.text()) || "Barcode product se link nahi hua");
+      const updated = await response.json();
+      const nextCache = [...productCacheRef.current.filter((row) => String(row.id) !== String(updated.id)), updated];
+      productCacheRef.current = nextCache;
+      setProductCache(nextCache);
+      localStorage.setItem("vaishnav_product_scan_cache", JSON.stringify(nextCache));
+      setMessage("Barcode selected product se link ho gaya. Ab product lookup kar rahe hain...");
+      await submitCode(scannedCode);
+    } catch (error) {
+      setMessage(error.message || "Barcode link nahi hua.");
+    } finally {
+      setLinkingCode(false);
     }
   };
 
@@ -190,6 +225,18 @@ export default function MobileScanner() {
 
         {message && <div role="status" style={message.includes("nahi mila") || message.includes("nahi hua") ? styles.error : styles.status}>{message}</div>}
 
+        {unmatchedCode && productCache.length > 0 && <div style={styles.linkPanel}>
+          <strong>Ye code kisi product ke barcode se match nahi hua.</strong>
+          <p style={{ margin: "6px 0 10px" }}>Agar aap isi product ka original barcode use karna chahte hain, product select karke barcode link karein. Isse us product ka purana barcode replace hoga.</p>
+          <div style={styles.manualForm}>
+            <select value={selectedLinkProduct} onChange={(event) => setSelectedLinkProduct(event.target.value)} style={styles.input}>
+              <option value="">Product select karein</option>
+              {productCache.map((item) => <option key={item.id} value={item.id}>{item.productName} · current {item.barcode || "no barcode"}</option>)}
+            </select>
+            <button type="button" disabled={!selectedLinkProduct || linkingCode} onClick={linkScannedCode} style={styles.secondary}>{linkingCode ? "Linking..." : "Link barcode"}</button>
+          </div>
+        </div>}
+
         {product && <article style={styles.productCard}>
           <div style={styles.productName}>{product.productName}</div>
           <button type="button" onClick={() => setShowSellPrice((visible) => !visible)} style={styles.priceToggle}>{showSellPrice ? "Hide sell price" : "Show sell price (owner only)"}</button>
@@ -219,6 +266,7 @@ const styles = {
   connectedHint: { background: "#f0fdf4", color: "#166534", padding: 12, borderRadius: 10, marginTop: 14 },
   cacheHint: { color: "#64748b", fontSize: 13, marginTop: 10 },
   error: { background: "#fff1f2", color: "#9f1239", padding: 12, borderRadius: 10, marginTop: 14 },
+  linkPanel: { background: "#fffbeb", color: "#92400e", padding: 14, borderRadius: 10, marginTop: 14, border: "1px solid #fde68a" },
   productCard: { marginTop: 16, padding: 16, border: "1px solid #bbf7d0", background: "#f0fdf4", borderRadius: 12, color: "#14532d" },
   productName: { fontSize: 19, fontWeight: 700 },
   price: { fontSize: 22, fontWeight: 800, marginTop: 8 },
