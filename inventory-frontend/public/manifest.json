@@ -18,7 +18,9 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": "/",
+  "start_url": "/mobile-scan",
+  "scope": "/",
+  "description": "Scan product barcodes and instantly see saved descriptions and sell prices.",
   "display": "standalone",
   "orientation": "portrait",
   "theme_color": "#071635",

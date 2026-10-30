@@ -14,6 +14,7 @@ export default function MobileScanner() {
   const [product, setProduct] = useState(null);
   const [scannedCode, setScannedCode] = useState("");
   const [showSellPrice, setShowSellPrice] = useState(false);
+  const [billMode, setBillMode] = useState(false);
   const [unmatchedCode, setUnmatchedCode] = useState(false);
   const [selectedLinkProduct, setSelectedLinkProduct] = useState("");
   const [linkingCode, setLinkingCode] = useState(false);
@@ -30,10 +31,32 @@ export default function MobileScanner() {
   const nativeScanFrameRef = useRef(null);
   const nativeScanningRef = useRef(false);
   const nativeDetectBusyRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const wakeLockRef = useRef(null);
   const lastScanRef = useRef({ code: "", at: 0 });
   const productCacheRef = useRef(productCache);
   const scanSequenceRef = useRef(0);
   const pendingRequestsRef = useRef(0);
+
+  const playScanFeedback = () => {
+    try {
+      const context = audioContextRef.current;
+      if (context && context.state === "running") {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(1550, context.currentTime);
+        gain.gain.setValueAtTime(0.0001, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.12);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(context.currentTime);
+        oscillator.stop(context.currentTime + 0.13);
+      }
+    } catch (_) { /* Sound may be blocked by the phone's browser settings. */ }
+    if (navigator.vibrate) navigator.vibrate(45);
+  };
 
   useEffect(() => {
     let active = true;
@@ -56,6 +79,8 @@ export default function MobileScanner() {
     if (nativeScanFrameRef.current) cancelAnimationFrame(nativeScanFrameRef.current);
     const stream = videoRef.current?.srcObject;
     stream?.getTracks?.().forEach((track) => track.stop());
+    wakeLockRef.current?.release?.().catch?.(() => {});
+    audioContextRef.current?.close?.().catch?.(() => {});
   }, []);
 
   const submitCode = async (rawCode) => {
@@ -63,6 +88,7 @@ export default function MobileScanner() {
     if (!barcode) return;
     const scanSequence = ++scanSequenceRef.current;
     setScannedCode(barcode);
+    playScanFeedback();
     setShowSellPrice(true);
     setUnmatchedCode(false);
     const cachedProduct = productCacheRef.current.find((row) => String(row.barcode || "").trim().toLowerCase() === barcode.toLowerCase());
@@ -79,7 +105,7 @@ export default function MobileScanner() {
       const response = await fetch(`${API_BASE}/scanner-bridge/mobile/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stationToken, barcode })
+        body: JSON.stringify({ stationToken: billMode ? stationToken : "", barcode })
       });
       let result = await response.json().catch(() => ({}));
       if (!response.ok && (response.status === 404 || response.status === 405)) {
@@ -105,7 +131,9 @@ export default function MobileScanner() {
           ? "Latest backend price mil gaya; product laptop ke khule Billing bill mein add ho gaya."
           : result.available === false
             ? "Product details aur sell price dikh rahe hain, lekin stock zero hai—bill mein add nahi hua."
-            : "Latest backend price mil gaya. Laptop connected nahi hai; details yahin dikh rahi hain.");
+            : billMode
+              ? "Latest backend price mil gaya. Billing active nahi thi; product bill mein add nahi hua."
+              : "Product details aur sell price yahin hain. Price check mode mein bill mein item add nahi hoga.");
       }
       setManualCode("");
     } catch (error) {
@@ -131,6 +159,12 @@ export default function MobileScanner() {
     }
     setMessage("Camera permission maang rahe hain...");
     try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass && !audioContextRef.current) audioContextRef.current = new AudioContextClass();
+      if (audioContextRef.current?.state === "suspended") await audioContextRef.current.resume();
+      if ("wakeLock" in navigator) {
+        try { wakeLockRef.current = await navigator.wakeLock.request("screen"); } catch (_) { /* Optional on unsupported phones. */ }
+      }
       // Chromium on Android can use the phone's native barcode decoder. It is
       // much lighter than running every ZXing format against every camera frame.
       if ("BarcodeDetector" in window) {
@@ -211,6 +245,8 @@ export default function MobileScanner() {
       setMessage("Camera ready hai. Product ka QR/barcode frame mein laaiye.");
     } catch (error) {
       setCameraOn(false);
+      wakeLockRef.current?.release?.().catch?.(() => {});
+      wakeLockRef.current = null;
       setMessage(error.message || "Camera start nahi hua. Permission allow karke dobara try karein.");
     }
   };
@@ -250,6 +286,8 @@ export default function MobileScanner() {
     stream?.getTracks?.().forEach((track) => track.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraOn(false);
+    wakeLockRef.current?.release?.().catch?.(() => {});
+    wakeLockRef.current = null;
   };
 
   return (
@@ -257,19 +295,23 @@ export default function MobileScanner() {
       <section style={styles.card}>
         <div style={styles.brand}>VAISHNAV INVENTORY</div>
         <h1 style={styles.heading}>Mobile Product Scanner</h1>
-        <p style={styles.help}>Line barcode ko camera frame ke beech mein seedha rakhein. Scan hote hi product description aur sell price dikh jayegi; Billing khuli aur paired ho toh item bill mein bhi judega.</p>
+        <p style={styles.help}>Sirf product ka price dekhne ke liye Billing kholne ki zaroorat nahi. Is page ko phone ki Home Screen par add karein; icon dabate hi yahin se scan karke description aur sell price dekhein. Scan par beep/vibration aayegi.</p>
 
         <div style={styles.cacheHint}>{productCacheReady ? `${productCache.length} products scan ke liye ready` : "Product list background mein refresh ho rahi hai; saved products ki scan details available hain."}</div>
 
         <div role="status" style={stationToken ? styles.connectedHint : styles.status}>
-          {stationToken ? "Laptop pairing saved hai. Billing active hone par scan bill mein bheja jayega." : "Standalone mode: scan karne par product details dikhegi. Bill mein bhejne ke liye laptop ke Billing page ka pairing QR scan karein."}
+          {stationToken ? "Laptop se pairing saved hai. Bill mode OFF mein yahan sirf price/description dikhegi." : "Standalone price lookup: Billing section kholne ki zaroorat nahi. Scan hote hi yahan sell price aur description dikhegi."}
         </div>
+
+        <button type="button" style={billMode ? styles.billModeOn : styles.billModeOff} onClick={() => setBillMode((enabled) => !enabled)}>
+          {billMode ? "Bill mode ON · scan bill mein bhejne ki koshish karega" : "Price check mode · bill mein add nahi hoga"}
+        </button>
 
         <video ref={videoRef} playsInline muted style={{ ...styles.video, display: cameraOn ? "block" : "none" }} />
 
         <div style={styles.actions}>
           {!cameraOn
-            ? <button type="button" style={styles.primary} onClick={startCamera}>Camera se scan karein</button>
+            ? <button type="button" style={styles.primary} onClick={startCamera}>Scanner chalu karein</button>
             : <button type="button" style={styles.secondary} onClick={stopCamera}>Camera band karein</button>}
         </div>
 
@@ -319,6 +361,8 @@ const styles = {
   input: { minWidth: 0, flex: 1, border: "1px solid #cbd5e1", borderRadius: 10, padding: 12, fontSize: 16 },
   status: { background: "#eff6ff", color: "#1e3a8a", padding: 12, borderRadius: 10, marginTop: 14 },
   connectedHint: { background: "#f0fdf4", color: "#166534", padding: 12, borderRadius: 10, marginTop: 14 },
+  billModeOff: { width: "100%", marginTop: 10, border: "1px solid #bbf7d0", borderRadius: 10, padding: 12, background: "#f0fdf4", color: "#166534", fontWeight: 700, textAlign: "left" },
+  billModeOn: { width: "100%", marginTop: 10, border: "1px solid #fdba74", borderRadius: 10, padding: 12, background: "#fff7ed", color: "#9a3412", fontWeight: 700, textAlign: "left" },
   cacheHint: { color: "#64748b", fontSize: 13, marginTop: 10 },
   error: { background: "#fff1f2", color: "#9f1239", padding: 12, borderRadius: 10, marginTop: 14 },
   linkPanel: { background: "#fffbeb", color: "#92400e", padding: 14, borderRadius: 10, marginTop: 14, border: "1px solid #fde68a" },
