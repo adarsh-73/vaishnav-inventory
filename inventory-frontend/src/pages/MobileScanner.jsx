@@ -13,7 +13,10 @@ export default function MobileScanner() {
   const [manualCode, setManualCode] = useState("");
   const [product, setProduct] = useState(null);
   const [scannedCode, setScannedCode] = useState("");
-  const [showSellPrice, setShowSellPrice] = useState(true);
+  const [showSellPrice, setShowSellPrice] = useState(false);
+  const [unmatchedCode, setUnmatchedCode] = useState(false);
+  const [selectedLinkProduct, setSelectedLinkProduct] = useState("");
+  const [linkingCode, setLinkingCode] = useState(false);
   const [productCache, setProductCache] = useState(() => {
     try { return JSON.parse(localStorage.getItem("vaishnav_product_scan_cache") || "[]"); }
     catch { return []; }
@@ -22,11 +25,11 @@ export default function MobileScanner() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
-  const [unmatchedCode, setUnmatchedCode] = useState(false);
-  const [selectedLinkProduct, setSelectedLinkProduct] = useState("");
-  const [linkingCode, setLinkingCode] = useState(false);
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
+  const nativeScanFrameRef = useRef(null);
+  const nativeScanningRef = useRef(false);
+  const nativeDetectBusyRef = useRef(false);
   const lastScanRef = useRef({ code: "", at: 0 });
   const productCacheRef = useRef(productCache);
   const scanSequenceRef = useRef(0);
@@ -34,7 +37,7 @@ export default function MobileScanner() {
 
   useEffect(() => {
     let active = true;
-    fetch(API_BASE + "/products")
+    fetch(`${API_BASE}/products`)
       .then((response) => { if (!response.ok) throw new Error("Product list unavailable"); return response.json(); })
       .then((rows) => {
         if (!active || !Array.isArray(rows)) return;
@@ -48,9 +51,11 @@ export default function MobileScanner() {
   }, []);
 
   useEffect(() => () => {
-    controlsRef.current && controlsRef.current.stop();
-    const stream = videoRef.current && videoRef.current.srcObject;
-    if (stream && stream.getTracks) stream.getTracks().forEach((track) => track.stop());
+    controlsRef.current?.stop();
+    nativeScanningRef.current = false;
+    if (nativeScanFrameRef.current) cancelAnimationFrame(nativeScanFrameRef.current);
+    const stream = videoRef.current?.srcObject;
+    stream?.getTracks?.().forEach((track) => track.stop());
   }, []);
 
   const submitCode = async (rawCode) => {
@@ -63,7 +68,7 @@ export default function MobileScanner() {
     const cachedProduct = productCacheRef.current.find((row) => String(row.barcode || "").trim().toLowerCase() === barcode.toLowerCase());
     if (cachedProduct) {
       setProduct(cachedProduct);
-      setMessage("Product details dikh rahi hain; latest backend price check ho raha hai.");
+      setMessage("Product details turant dikhayi gayi; latest backend price check ho raha hai.");
     } else {
       setProduct(null);
       setMessage("Product backend se check ho raha hai...");
@@ -71,44 +76,44 @@ export default function MobileScanner() {
     pendingRequestsRef.current += 1;
     setBusy(true);
     try {
-      const response = await fetch(API_BASE + "/scanner-bridge/mobile/scan", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const response = await fetch(`${API_BASE}/scanner-bridge/mobile/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stationToken, barcode })
       });
       let result = await response.json().catch(() => ({}));
       if (!response.ok && (response.status === 404 || response.status === 405)) {
-        const fallback = await fetch(API_BASE + "/products/barcode/" + encodeURIComponent(barcode));
-        if (fallback.ok) result = { product: await fallback.json(), available: true, addedToBill: false };
-      }
-      if (!result.product && cachedProduct && cachedProduct.id) {
-        const saved = await fetch(API_BASE + "/products/" + cachedProduct.id);
-        if (saved.ok) result = { product: await saved.json(), available: Number(cachedProduct.quantity) > 0, addedToBill: false };
+        const fallbackResponse = await fetch(`${API_BASE}/products/barcode/${encodeURIComponent(barcode)}`);
+        if (fallbackResponse.ok) result = { product: await fallbackResponse.json(), available: true, addedToBill: false };
       }
       if (!result.product) {
-        const reason = result.message || result.error || "Barcode se product nahi mila";
-        throw new Error(String(reason) + ". Barcode read: " + barcode);
+        const reason = result.message || result.error || `Backend status ${response.status}`;
+        if (cachedProduct?.id) {
+          const savedResponse = await fetch(`${API_BASE}/products/${cachedProduct.id}`);
+          if (savedResponse.ok) result = { product: await savedResponse.json(), available: Number(cachedProduct.quantity) > 0, addedToBill: false };
+        }
+        if (!result.product) throw new Error(`${reason}. Barcode read: ${barcode}`);
       }
-      const latest = result.product;
-      const nextCache = [...productCacheRef.current.filter((row) => String(row.id) !== String(latest.id)), latest];
-      productCacheRef.current = nextCache;
-      setProductCache(nextCache);
-      localStorage.setItem("vaishnav_product_scan_cache", JSON.stringify(nextCache));
+      const latestProduct = result.product;
+      const updatedCache = [...productCacheRef.current.filter((row) => String(row.barcode) !== String(latestProduct.barcode)), latestProduct];
+      productCacheRef.current = updatedCache;
+      setProductCache(updatedCache);
+      localStorage.setItem("vaishnav_product_scan_cache", JSON.stringify(updatedCache));
       if (scanSequence === scanSequenceRef.current) {
-        setProduct(latest);
+        setProduct(latestProduct);
         setMessage(result.addedToBill
-          ? "Product bill mein add hua. Sell price yahan dikh rahi hai."
+          ? "Latest backend price mil gaya; product laptop ke khule Billing bill mein add ho gaya."
           : result.available === false
-            ? "Product details mil gayi, lekin stock zero hai—bill mein add nahi hua."
-            : "Product details aur backend sell price mil gayi.");
+            ? "Product details aur sell price dikh rahe hain, lekin stock zero hai—bill mein add nahi hua."
+            : "Latest backend price mil gaya. Laptop connected nahi hai; details yahin dikh rahi hain.");
       }
       setManualCode("");
     } catch (error) {
       if (scanSequence === scanSequenceRef.current) {
         if (cachedProduct) {
           setProduct(cachedProduct);
-          setMessage("Backend abhi respond nahi kar raha; saved product details dikhayi hain. Bill ke liye connection chahiye.");
+          setMessage("Network/backend abhi respond nahi kar raha; saved product details dikhayi hain. Bill mein bhejne ke liye connection chahiye.");
         } else {
-          setProduct(null);
           setMessage(error.message || "Scan process nahi hua. Connection check karein.");
           setUnmatchedCode(/nahi mila|not found|does not exist/i.test(error.message || ""));
         }
@@ -120,21 +125,71 @@ export default function MobileScanner() {
   };
 
   const startCamera = async () => {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia) {
       setMessage("Camera ke liye secure HTTPS link ko Chrome/Safari mein kholiye.");
       return;
     }
     setMessage("Camera permission maang rahe hain...");
     try {
+      // Chromium on Android can use the phone's native barcode decoder. It is
+      // much lighter than running every ZXing format against every camera frame.
+      if ("BarcodeDetector" in window) {
+        const supported = await window.BarcodeDetector.getSupportedFormats();
+        const wanted = ["code_128", "ean_13", "ean_8", "upc_a", "upc_e", "code_39", "code_93", "itf", "codabar", "qr_code"];
+        const formats = wanted.filter((format) => supported.includes(format));
+        if (formats.length) {
+          const detector = new window.BarcodeDetector({ formats });
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
+            facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }
+          } });
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          nativeScanningRef.current = true;
+          setCameraOn(true);
+          setMessage("Camera ready hai. Barcode ko frame mein seedha rakhein.");
+          let lastFrameAt = 0;
+          const scanFrame = async (now) => {
+            if (!nativeScanningRef.current) return;
+            nativeScanFrameRef.current = requestAnimationFrame(scanFrame);
+            if (now - lastFrameAt < 140 || nativeDetectBusyRef.current || videoRef.current.readyState < 2) return;
+            lastFrameAt = now;
+            nativeDetectBusyRef.current = true;
+            try {
+              const detections = await detector.detect(videoRef.current);
+              if (detections.length) {
+                const code = detections[0].rawValue;
+                if (code && (lastScanRef.current.code !== code || Date.now() - lastScanRef.current.at >= 1600)) {
+                  lastScanRef.current = { code, at: Date.now() };
+                  submitCode(code);
+                }
+              }
+            } catch (_) {
+              // Keep trying on the next frame; camera focus can briefly fail.
+            } finally {
+              nativeDetectBusyRef.current = false;
+            }
+          };
+          nativeScanFrameRef.current = requestAnimationFrame(scanFrame);
+          return;
+        }
+      }
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const hints = new Map([
-        [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93, BarcodeFormat.ITF, BarcodeFormat.CODABAR, BarcodeFormat.QR_CODE]],
+        [DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.CODE_128, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_39,
+          BarcodeFormat.CODE_93, BarcodeFormat.ITF, BarcodeFormat.CODABAR,
+          BarcodeFormat.QR_CODE
+        ]],
         [DecodeHintType.TRY_HARDER, true]
       ]);
       const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 120, delayBetweenScanSuccess: 500 });
-      controlsRef.current = await reader.decodeFromConstraints({ audio: false, video: {
-        facingMode: { ideal: "environment" }, width: { min: 640, ideal: 1920 },
-        height: { min: 480, ideal: 1080 }, aspectRatio: { ideal: 1.777 }
+      controlsRef.current = await reader.decodeFromConstraints({ video: {
+        facingMode: { ideal: "environment" },
+        width: { min: 640, ideal: 1920 },
+        height: { min: 480, ideal: 1080 },
+        aspectRatio: { ideal: 1.777 },
+        focusMode: { ideal: "continuous" }
       } }, videoRef.current, (result) => {
         if (!result) return;
         const code = result.getText();
@@ -143,38 +198,35 @@ export default function MobileScanner() {
         lastScanRef.current = { code, at: now };
         submitCode(code);
       });
-      const track = videoRef.current && videoRef.current.srcObject && videoRef.current.srcObject.getVideoTracks()[0];
-      const capabilities = track && track.getCapabilities && track.getCapabilities();
-      if (capabilities && capabilities.focusMode && capabilities.focusMode.includes("continuous")) {
-        track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+      const cameraTrack = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+      const cameraCapabilities = cameraTrack?.getCapabilities?.();
+      if (cameraCapabilities?.focusMode?.includes("continuous")) {
+        cameraTrack.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
       }
       setCameraOn(true);
-      setMessage("Camera ready hai. Barcode ko frame mein seedha rakhein.");
+      setMessage("Camera ready hai. Product ka QR/barcode frame mein laaiye.");
     } catch (error) {
       setCameraOn(false);
-      setMessage(error.name === "NotAllowedError" ? "Camera permission allow karein; phone par app HTTPS se kholna zaroori hai." : (error.message || "Camera start nahi hua."));
+      setMessage(error.message || "Camera start nahi hua. Permission allow karke dobara try karein.");
     }
-  };
-
-  const stopCamera = () => {
-    controlsRef.current && controlsRef.current.stop();
-    controlsRef.current = null;
-    const stream = videoRef.current && videoRef.current.srcObject;
-    if (stream && stream.getTracks) stream.getTracks().forEach((track) => track.stop());
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setCameraOn(false);
   };
 
   const linkScannedCode = async () => {
     if (!selectedLinkProduct || !scannedCode) return;
     setLinkingCode(true);
     try {
-      const response = await fetch(API_BASE + "/products/" + selectedLinkProduct, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
+      const response = await fetch(`${API_BASE}/products/${selectedLinkProduct}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ barcode: scannedCode })
       });
       if (!response.ok) throw new Error((await response.text()) || "Barcode product se link nahi hua");
-      setMessage("Barcode product se link ho gaya; ab lookup kar rahe hain.");
+      const updated = await response.json();
+      const nextCache = [...productCacheRef.current.filter((row) => String(row.id) !== String(updated.id)), updated];
+      productCacheRef.current = nextCache;
+      setProductCache(nextCache);
+      localStorage.setItem("vaishnav_product_scan_cache", JSON.stringify(nextCache));
+      setMessage("Barcode selected product se link ho gaya. Ab product lookup kar rahe hain...");
       await submitCode(scannedCode);
     } catch (error) {
       setMessage(error.message || "Barcode link nahi hua.");
@@ -183,28 +235,50 @@ export default function MobileScanner() {
     }
   };
 
+  const stopCamera = () => {
+    controlsRef.current?.stop();
+    controlsRef.current = null;
+    nativeScanningRef.current = false;
+    if (nativeScanFrameRef.current) cancelAnimationFrame(nativeScanFrameRef.current);
+    nativeScanFrameRef.current = null;
+    nativeDetectBusyRef.current = false;
+    const stream = videoRef.current?.srcObject;
+    stream?.getTracks?.().forEach((track) => track.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
+  };
+
   return (
     <main className="mobile-scan-page" style={styles.shell}>
       <section style={styles.card}>
         <div style={styles.brand}>VAISHNAV INVENTORY</div>
         <h1 style={styles.heading}>Mobile Product Scanner</h1>
-        <p style={styles.help}>Barcode scan hote hi product description aur sell price dikhegi. Billing khuli aur paired ho toh item bill mein add hoga.</p>
-        <div style={styles.cacheHint}>{productCacheReady ? productCache.length + " products scan ke liye ready" : "Product list load ho rahi hai..."}</div>
+        <p style={styles.help}>Line barcode ko camera frame ke beech mein seedha rakhein. Scan hote hi product description aur sell price dikh jayegi; Billing khuli aur paired ho toh item bill mein bhi judega.</p>
+
+        <div style={styles.cacheHint}>{productCacheReady ? `${productCache.length} products scan ke liye ready` : "Product list background mein refresh ho rahi hai; saved products ki scan details available hain."}</div>
+
         <div role="status" style={stationToken ? styles.connectedHint : styles.status}>
-          {stationToken ? "Laptop pairing saved hai. Billing active hone par scan bill mein bheja jayega." : "Product check mode. Bill mein bhejne ke liye Billing page ka Phone Scanner QR scan karein."}
+          {stationToken ? "Laptop pairing saved hai. Billing active hone par scan bill mein bheja jayega." : "Standalone mode: scan karne par product details dikhegi. Bill mein bhejne ke liye laptop ke Billing page ka pairing QR scan karein."}
         </div>
+
         <video ref={videoRef} playsInline muted style={{ ...styles.video, display: cameraOn ? "block" : "none" }} />
+
         <div style={styles.actions}>
-          {!cameraOn ? <button type="button" style={styles.primary} onClick={startCamera}>Camera se scan karein</button> : <button type="button" style={styles.secondary} onClick={stopCamera}>Camera band karein</button>}
+          {!cameraOn
+            ? <button type="button" style={styles.primary} onClick={startCamera}>Camera se scan karein</button>
+            : <button type="button" style={styles.secondary} onClick={stopCamera}>Camera band karein</button>}
         </div>
+
         <form style={styles.manualForm} onSubmit={(event) => { event.preventDefault(); submitCode(manualCode); }}>
           <input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Barcode manually type karein" style={styles.input} />
           <button type="submit" disabled={busy || !manualCode.trim()} style={styles.secondary}>Find</button>
         </form>
-        {message && <div role="status" style={unmatchedCode ? styles.error : styles.status}>{busy ? "Product dhoondh rahe hain... " : ""}{message}</div>}
+
+        {message && <div role="status" style={message.includes("nahi mila") || message.includes("nahi hua") ? styles.error : styles.status}>{message}</div>}
+
         {unmatchedCode && productCache.length > 0 && <div style={styles.linkPanel}>
-          <strong>Ye code kisi product se match nahi hua.</strong>
-          <p style={{ margin: "6px 0 10px" }}>Product select karke barcode link karein. Isse us product ka purana barcode replace hoga.</p>
+          <strong>Ye code kisi product ke barcode se match nahi hua.</strong>
+          <p style={{ margin: "6px 0 10px" }}>Agar aap isi product ka original barcode use karna chahte hain, product select karke barcode link karein. Isse us product ka purana barcode replace hoga.</p>
           <div style={styles.manualForm}>
             <select value={selectedLinkProduct} onChange={(event) => setSelectedLinkProduct(event.target.value)} style={styles.input}>
               <option value="">Product select karein</option>
@@ -213,6 +287,7 @@ export default function MobileScanner() {
             <button type="button" disabled={!selectedLinkProduct || linkingCode} onClick={linkScannedCode} style={styles.secondary}>{linkingCode ? "Linking..." : "Link barcode"}</button>
           </div>
         </div>}
+
         {product && <article style={styles.productCard}>
           <div style={styles.productName}>{product.productName}</div>
           <button type="button" onClick={() => setShowSellPrice((visible) => !visible)} style={styles.priceToggle}>{showSellPrice ? "Hide sell price" : "Show sell price (owner only)"}</button>
