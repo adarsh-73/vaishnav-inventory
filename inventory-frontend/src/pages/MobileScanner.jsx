@@ -27,6 +27,9 @@ export default function MobileScanner() {
   const [cameraOn, setCameraOn] = useState(false);
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
+  const nativeScanFrameRef = useRef(null);
+  const nativeScanningRef = useRef(false);
+  const nativeDetectBusyRef = useRef(false);
   const lastScanRef = useRef({ code: "", at: 0 });
   const productCacheRef = useRef(productCache);
   const scanSequenceRef = useRef(0);
@@ -49,6 +52,8 @@ export default function MobileScanner() {
 
   useEffect(() => () => {
     controlsRef.current?.stop();
+    nativeScanningRef.current = false;
+    if (nativeScanFrameRef.current) cancelAnimationFrame(nativeScanFrameRef.current);
     const stream = videoRef.current?.srcObject;
     stream?.getTracks?.().forEach((track) => track.stop());
   }, []);
@@ -126,6 +131,48 @@ export default function MobileScanner() {
     }
     setMessage("Camera permission maang rahe hain...");
     try {
+      // Chromium on Android can use the phone's native barcode decoder. It is
+      // much lighter than running every ZXing format against every camera frame.
+      if ("BarcodeDetector" in window) {
+        const supported = await window.BarcodeDetector.getSupportedFormats();
+        const wanted = ["code_128", "ean_13", "ean_8", "upc_a", "upc_e", "code_39", "code_93", "itf", "codabar", "qr_code"];
+        const formats = wanted.filter((format) => supported.includes(format));
+        if (formats.length) {
+          const detector = new window.BarcodeDetector({ formats });
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
+            facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }
+          } });
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          nativeScanningRef.current = true;
+          setCameraOn(true);
+          setMessage("Camera ready hai. Barcode ko frame mein seedha rakhein.");
+          let lastFrameAt = 0;
+          const scanFrame = async (now) => {
+            if (!nativeScanningRef.current) return;
+            nativeScanFrameRef.current = requestAnimationFrame(scanFrame);
+            if (now - lastFrameAt < 140 || nativeDetectBusyRef.current || videoRef.current.readyState < 2) return;
+            lastFrameAt = now;
+            nativeDetectBusyRef.current = true;
+            try {
+              const detections = await detector.detect(videoRef.current);
+              if (detections.length) {
+                const code = detections[0].rawValue;
+                if (code && (lastScanRef.current.code !== code || Date.now() - lastScanRef.current.at >= 1600)) {
+                  lastScanRef.current = { code, at: Date.now() };
+                  submitCode(code);
+                }
+              }
+            } catch (_) {
+              // Keep trying on the next frame; camera focus can briefly fail.
+            } finally {
+              nativeDetectBusyRef.current = false;
+            }
+          };
+          nativeScanFrameRef.current = requestAnimationFrame(scanFrame);
+          return;
+        }
+      }
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const hints = new Map([
         [DecodeHintType.POSSIBLE_FORMATS, [
@@ -191,6 +238,10 @@ export default function MobileScanner() {
   const stopCamera = () => {
     controlsRef.current?.stop();
     controlsRef.current = null;
+    nativeScanningRef.current = false;
+    if (nativeScanFrameRef.current) cancelAnimationFrame(nativeScanFrameRef.current);
+    nativeScanFrameRef.current = null;
+    nativeDetectBusyRef.current = false;
     const stream = videoRef.current?.srcObject;
     stream?.getTracks?.().forEach((track) => track.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
