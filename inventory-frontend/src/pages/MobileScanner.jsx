@@ -137,7 +137,11 @@ export default function MobileScanner() {
         const supported = await window.BarcodeDetector.getSupportedFormats();
         const wanted = ["code_128", "ean_13", "ean_8", "upc_a", "upc_e", "code_39", "code_93", "itf", "codabar", "qr_code"];
         const formats = wanted.filter((format) => supported.includes(format));
-        if (formats.length) {
+        // The labels printed by this app are CODE128. Some Android browsers
+        // expose BarcodeDetector but only implement QR/EAN formats; using
+        // that partial detector would silently ignore our product labels.
+        // In that case use ZXing below, which decodes CODE128 consistently.
+        if (formats.includes("code_128")) {
           const detector = new window.BarcodeDetector({ formats });
           const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
             facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }
