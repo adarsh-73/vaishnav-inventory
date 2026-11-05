@@ -125,6 +125,22 @@ public class ProductService {
             if (item.getDescription() == null || item.getDescription().isBlank()) {
                 item.setDescription(productData.getProductName());
             }
+
+            // Keep a complete bill snapshot before removing the product link.
+            // Existing invoice values are historical and must never be overwritten.
+            if (item.getSellPrice() == null) {
+                item.setSellPrice(productData.getSellPrice() == null ? 0.0 : productData.getSellPrice());
+            }
+            if (item.getPurchasePrice() == null) {
+                item.setPurchasePrice(productData.getPurchasePrice() == null ? 0.0 : productData.getPurchasePrice());
+            }
+            int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+            if (item.getTotalPrice() == null) {
+                item.setTotalPrice(item.getSellPrice() * quantity);
+            }
+            if (item.getProfit() == null) {
+                item.setProfit((item.getSellPrice() - item.getPurchasePrice()) * quantity);
+            }
             item.setProductInvoiceitem(null);
         }
         invoiceItemRepository.saveAll(invoiceItems);
