@@ -76,6 +76,12 @@ public class ProductController {
         return productService.deleteProduct(id);
     }
 
+    @PostMapping("/bulk-delete")
+    public Map<String, Object> deleteProducts(@RequestBody List<Long> ids) {
+        int deletedCount = productService.deleteProducts(ids);
+        return Map.of("deletedCount", deletedCount, "message", "Selected products deleted; bill history retained.");
+    }
+
     // Low Stock Products
     @GetMapping("/low-stock")
     public List<product> getLowStockProducts() {

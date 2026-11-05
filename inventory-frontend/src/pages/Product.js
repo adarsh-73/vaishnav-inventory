@@ -9,7 +9,9 @@ function Products() {
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
-  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [stockFilter, setStockFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [deletingSelected, setDeletingSelected] = useState(false);
   const [barcodeProduct, setBarcodeProduct] = useState(null);
   const [highlightProductId, setHighlightProductId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,7 +50,9 @@ function Products() {
 
   const filteredProducts = useMemo(() => {
     const text = query.trim().toLowerCase();
-    let nextProducts = showOutOfStock ? products : products.filter((product) => Number(product.quantity || 0) > 0);
+    let nextProducts = products;
+    if (stockFilter === "in-stock") nextProducts = nextProducts.filter((product) => Number(product.quantity || 0) > 0);
+    if (stockFilter === "zero") nextProducts = nextProducts.filter((product) => Number(product.quantity || 0) <= 0);
     if (lowStockOnly) {
       nextProducts = nextProducts.filter((product) => Number(product.quantity || 0) <= Number(product.minimumStock || 1));
     }
@@ -71,7 +75,48 @@ function Products() {
         .toLowerCase()
         .includes(text)
     );
-  }, [products, query, lowStockOnly, showOutOfStock]);
+  }, [products, query, lowStockOnly, stockFilter]);
+
+  useEffect(() => {
+    const existingIds = new Set(products.map((product) => String(product.id)));
+    setSelectedIds((current) => current.filter((id) => existingIds.has(String(id))));
+  }, [products]);
+
+  const visibleIds = filteredProducts.map((product) => product.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => allVisibleSelected
+      ? current.filter((id) => !visibleIds.includes(id))
+      : [...new Set([...current, ...visibleIds])]);
+  };
+
+  const handleDeleteSelected = async () => {
+    const selectedProducts = products.filter((product) => selectedIds.includes(product.id));
+    if (!selectedProducts.length) return alert("Pehle product select karo.");
+    const confirmed = window.confirm(`${selectedProducts.length} selected product delete honge. Purane bills aur profit/loss records safe rahenge. Kya delete karein?`);
+    if (!confirmed) return;
+
+    setDeletingSelected(true);
+    try {
+      const response = await fetch(`${API_BASE}/products/bulk-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(selectedProducts.map((product) => product.id))
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Selected products delete nahi hue");
+      }
+      setSelectedIds([]);
+      await loadProducts();
+      alert(`${selectedProducts.length} product delete hue. Bill aur profit/loss history safe hai.`);
+    } catch (error) {
+      alert(`Bulk delete error: ${error.message}`);
+    } finally {
+      setDeletingSelected(false);
+    }
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -190,14 +235,26 @@ function Products() {
         <button type="button" onClick={() => setLowStockOnly(!lowStockOnly)} style={lowStockOnly ? activeFilterBtn : secondaryBtn}>
           {lowStockOnly ? "Low Stock: ON" : "Low Stock Only"}
         </button>
-        <button type="button" onClick={() => setShowOutOfStock(!showOutOfStock)} style={showOutOfStock ? activeFilterBtn : secondaryBtn}>
-          {showOutOfStock ? "Out of Stock: Shown" : "Show Out of Stock"}
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: "0 10px 10px" }}>
+          Stock filter
+          <select value={stockFilter} onChange={(event) => setStockFilter(event.target.value)} style={inputStyle}>
+            <option value="all">All products</option>
+            <option value="in-stock">Stock above 0</option>
+            <option value="zero">Stock 0</option>
+          </select>
+        </label>
+        <button type="button" onClick={toggleSelectAll} style={secondaryBtn}>
+          {allVisibleSelected ? "Deselect All" : `Select All (${filteredProducts.length})`}
+        </button>
+        <button type="button" onClick={handleDeleteSelected} disabled={!selectedIds.length || deletingSelected} style={{ ...dangerBtn, marginLeft: 8, opacity: !selectedIds.length || deletingSelected ? 0.55 : 1 }}>
+          {deletingSelected ? "Deleting..." : `Delete Selected (${selectedIds.length})`}
         </button>
         <span style={{ marginLeft: "10px", color: "#64748b" }}>{loading ? "Loading..." : `${filteredProducts.length} product found`}</span>
 
         <table className="responsive-table product-table" style={tableStyle}>
           <thead>
             <tr>
+              <th style={thStyle}><input type="checkbox" aria-label="Select all visible products" checked={allVisibleSelected} onChange={toggleSelectAll} /></th>
               <th style={thStyle}>Product</th>
               <th style={thStyle}>Make / Model</th>
               <th style={thStyle}>SR No.</th>
@@ -215,6 +272,9 @@ function Products() {
               const highlighted = String(product.id) === String(highlightProductId);
               return (
                 <tr key={product.id} style={highlighted ? highlightedRow : lowStock ? lowStockRow : undefined}>
+                  <td data-label="Select" style={tdStyle}>
+                    <input type="checkbox" aria-label={`Select ${product.productName}`} checked={selectedIds.includes(product.id)} onChange={() => setSelectedIds((current) => current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id])} />
+                  </td>
                   <td data-label="Product" style={tdStyle}>
                     <strong>{product.productName}</strong>
                     <div style={mutedText}>{product.brand || product.category || "-"}</div>

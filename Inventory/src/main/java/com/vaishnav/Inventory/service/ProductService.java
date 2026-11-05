@@ -97,8 +97,28 @@ public class ProductService {
     // Delete Product
     @Transactional
     public String deleteProduct(Long id) {
-
         product productData = getProductById(id);
+
+        deleteProductRecord(productData);
+        return "Product Deleted Successfully";
+    }
+
+    @Transactional
+    public int deleteProducts(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new RuntimeException("Delete karne ke liye products select karo");
+        }
+
+        int deletedCount = 0;
+        for (Long id : ids.stream().filter(java.util.Objects::nonNull).distinct().toList()) {
+            product productData = getProductById(id);
+            deleteProductRecord(productData);
+            deletedCount++;
+        }
+        return deletedCount;
+    }
+
+    private void deleteProductRecord(product productData) {
 
         List<InvoiceItem> invoiceItems = invoiceItemRepository.findByProductInvoiceitem(productData);
         for (InvoiceItem item : invoiceItems) {
@@ -122,8 +142,6 @@ public class ProductService {
         stockHistoryRepository.saveAll(stockHistories);
 
         productRepository.delete(productData);
-
-        return "Product Deleted Successfully";
     }
 
     // Update Product (Clean Update)
