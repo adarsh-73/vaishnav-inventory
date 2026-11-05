@@ -148,8 +148,6 @@ export default function VaishnavFinalInvoice() {
     return `upi://pay?${params.toString()}`;
   }, [billNo, qrPayableAmount, upiId]);
 
-  const dynamicQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(qrData)}`;
-  const qrSrc = qrPayableAmount > 0 ? dynamicQrSrc : (qrImage || dynamicQrSrc);
 
   const handlePrint = () => {
     try {
@@ -898,12 +896,9 @@ export default function VaishnavFinalInvoice() {
             <div style={styles.qrGraphicWhiteOuterFrameBox}>
               
               {/* Dynamic Timestamp url automatic load karega bina purani memory fassaye */}
-             {/* QR Code section ko bas itna sa change karke dekho */}
-<img 
-  src={qrSrc} 
-  alt="QR Code" 
-  style={{ width: '90px', height: '90px', objectFit: 'contain' }}
-/>
+              {qrPayableAmount <= 0 && qrImage
+                ? <img src={qrImage} alt="UPI QR Code" style={{ width: 90, height: 90, objectFit: "contain" }} />
+                : <QRCodeSVG value={qrData} size={90} level="M" includeMargin />}
 
             </div>
           </div>
