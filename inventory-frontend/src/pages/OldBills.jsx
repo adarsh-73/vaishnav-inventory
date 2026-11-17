@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../utils/api";
 import { printInvoiceElement } from "../utils/printInvoice";
@@ -24,6 +24,7 @@ function OldBills() {
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [paymentChoice, setPaymentChoice] = useState("custom");
+  const paymentFormRef = useRef(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const isUdharMode = searchParams.get("udhar") === "1";
   const selectedUdharParty = searchParams.get("party") || "";
@@ -75,6 +76,14 @@ function OldBills() {
       .catch((error) => { if (active) { setPaymentHistory([]); console.error(error); } });
     return () => { active = false; };
   }, [selectedInvoice?.id]);
+
+  useEffect(() => {
+    if (!showPaymentForm) return;
+    const frame = window.requestAnimationFrame(() => {
+      paymentFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showPaymentForm]);
 
   useEffect(() => {
     const qParam = searchParams.get("q");
@@ -747,7 +756,7 @@ function OldBills() {
               {Number(selectedInvoice.remainingAmount || 0) > 0 && <button type="button" onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>Paid</button>}
             </div>
             {showPaymentForm && (
-              <form onSubmit={handleSaveInvoicePayment} style={paymentFormStyle}>
+              <form ref={paymentFormRef} onSubmit={handleSaveInvoicePayment} style={paymentFormStyle}>
                 <h3 style={{ margin: "0 0 12px", color: "#0f2963" }}>Record amount received</h3>
                 <div style={paymentChoiceRow}>
                   <button type="button" onClick={() => { setPaymentChoice("full"); setPaymentForm({ ...paymentForm, amount: String(Number(selectedInvoice.remainingAmount || 0)) }); }} style={paymentChoice === "full" ? activePaymentChoice : secondaryBtn}>Full Balance · Rs. {Number(selectedInvoice.remainingAmount || 0).toFixed(2)}</button>
