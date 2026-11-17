@@ -1,6 +1,7 @@
 package com.vaishnav.Inventory.entity;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
@@ -49,6 +50,10 @@ public class Invoice {
     @Getter
     @Setter
     private List<InvoiceItem> invoiceItems;
+
+    @OneToMany(mappedBy = "invoice", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    private List<InvoicePayment> paymentHistory = new java.util.ArrayList<>();
 
     public Invoice() {
     }

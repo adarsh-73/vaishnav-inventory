@@ -20,6 +20,10 @@ function OldBills() {
   const [retentionYears, setRetentionYears] = useState(2);
   const [cleanupPreview, setCleanupPreview] = useState(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
+  const [paymentBusy, setPaymentBusy] = useState(false);
   const isUdharMode = searchParams.get("udhar") === "1";
   const selectedUdharParty = searchParams.get("party") || "";
 
@@ -54,6 +58,22 @@ function OldBills() {
   useEffect(() => {
     loadInvoices();
   }, [loadInvoices]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedInvoice?.id) {
+      setPaymentHistory([]);
+      return () => { active = false; };
+    }
+    fetch(`${API_BASE}/invoices/${selectedInvoice.id}/payments`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Payment history load nahi hui");
+        return response.json();
+      })
+      .then((rows) => { if (active) setPaymentHistory(Array.isArray(rows) ? rows : []); })
+      .catch((error) => { if (active) { setPaymentHistory([]); console.error(error); } });
+    return () => { active = false; };
+  }, [selectedInvoice?.id]);
 
   useEffect(() => {
     const qParam = searchParams.get("q");
@@ -354,22 +374,43 @@ function OldBills() {
     }
   };
 
-  const handleMarkInvoicePaid = async (invoice) => {
-    const confirmed = window.confirm(`${invoice.customer?.customerName || "Customer"} ka ${invoice.invoiceNumber || "bill"} udhar paid mark karna hai?`);
-    if (!confirmed) return;
+  const openPaymentForm = (invoice, payFullBalance = false) => {
+    setSelectedInvoice(invoice);
+    setPaymentForm({
+      ...emptyPaymentForm(),
+      amount: payFullBalance ? String(Number(invoice.remainingAmount || 0)) : "",
+      receivedFrom: invoice.customer?.customerName || ""
+    });
+    setShowPaymentForm(true);
+  };
 
+  const handleSaveInvoicePayment = async (event) => {
+    event.preventDefault();
+    if (!selectedInvoice) return;
+    if (!Number(paymentForm.amount) || Number(paymentForm.amount) <= 0) return alert("Payment amount 0 se zyada enter karein.");
+    setPaymentBusy(true);
     try {
-      const response = await fetch(`${API_BASE}/invoices/${invoice.id}/mark-paid`, { method: "PUT" });
+      const response = await fetch(`${API_BASE}/invoices/${selectedInvoice.id}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...paymentForm, amount: Number(paymentForm.amount) })
+      });
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(errorText || "Udhar paid update failed");
+        throw new Error(errorText || "Payment save nahi hui");
       }
       const updatedInvoice = await response.json();
       setSelectedInvoice(updatedInvoice);
+      const historyResponse = await fetch(`${API_BASE}/invoices/${updatedInvoice.id}/payments`);
+      if (historyResponse.ok) setPaymentHistory(await historyResponse.json());
+      setShowPaymentForm(false);
       await loadInvoices();
-      alert("Udhar paid update ho gaya.");
+      setSelectedInvoice(updatedInvoice);
+      alert("Payment save ho gayi. Bill ka paid amount aur balance update ho gaya.");
     } catch (error) {
-      alert(`Udhar paid update nahi hua: ${error.message}`);
+      alert(`Payment save nahi hui: ${error.message}`);
+    } finally {
+      setPaymentBusy(false);
     }
   };
 
@@ -607,7 +648,7 @@ function OldBills() {
                     <td style={miniAmountTd}>Rs. {row.amount}</td>
                     <td style={miniTd}>
                       <button type="button" onClick={() => row.kind === "bill" ? setSelectedInvoice(row.invoice) : navigate("/daily-book")} style={miniEditBtn}>View</button>
-                      <button type="button" onClick={() => row.kind === "bill" ? handleMarkInvoicePaid(row.invoice) : handleMarkDailyBookPaid(row.entry)} style={miniPaidBtn}>Paid</button>
+                      <button type="button" onClick={() => row.kind === "bill" ? openPaymentForm(row.invoice) : handleMarkDailyBookPaid(row.entry)} style={miniPaidBtn}>{row.kind === "bill" ? "Receive Payment" : "Paid"}</button>
                     </td>
                   </tr>
                 ))}
@@ -648,11 +689,11 @@ function OldBills() {
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
-                      handleMarkInvoicePaid(invoice);
+                      openPaymentForm(invoice);
                     }}
                     style={miniPaidBtn}
                   >
-                    Mark Paid
+                    Receive Payment
                   </button>
                 )}
                 <button
@@ -686,10 +727,43 @@ function OldBills() {
             <button onClick={handlePrint} style={primaryBtn}>Print</button>
             <button onClick={handleDownloadPdf} style={secondaryBtn}>Download PDF</button>
             <button onClick={handleWhatsAppSend} style={whatsAppBtn}>WhatsApp Send</button>
-            {Number(selectedInvoice.remainingAmount || 0) > 0 && <button onClick={() => handleMarkInvoicePaid(selectedInvoice)} style={paidBtn}>Mark Udhar Paid</button>}
+            {Number(selectedInvoice.remainingAmount || 0) > 0 && <>
+              <button onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>Add Payment</button>
+              <button onClick={() => openPaymentForm(selectedInvoice, true)} style={secondaryBtn}>Settle Full Balance</button>
+            </>}
             <button onClick={() => openReturnPanel(selectedInvoice)} style={returnBtn}>Return / Cancel Items</button>
             <button onClick={() => handleDeleteBill(selectedInvoice)} style={dangerBtn}>Delete Bill</button>
           </div>
+        )}
+
+        {selectedInvoice && (
+          <section style={paymentHistoryPanel}>
+            <div style={sectionHeaderRow}>
+              <div>
+                <h2 style={storageTitle}>Payment History · Bill {selectedInvoice.invoiceNumber || selectedInvoice.id}</h2>
+                <div style={subText}>Paid Rs. {Number(selectedInvoice.paidAmount || 0).toFixed(2)} · Balance Rs. {Number(selectedInvoice.remainingAmount || 0).toFixed(2)}</div>
+              </div>
+              {Number(selectedInvoice.remainingAmount || 0) > 0 && <button type="button" onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>+ Add Payment</button>}
+            </div>
+            {showPaymentForm && (
+              <form onSubmit={handleSaveInvoicePayment} style={paymentFormStyle}>
+                <h3 style={{ margin: "0 0 12px", color: "#0f2963" }}>Record amount received</h3>
+                <div style={paymentFormGrid}>
+                  <label>Amount received<input required type="number" min="0.01" step="0.01" max={Number(selectedInvoice.remainingAmount || 0)} value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} style={inputStyle} /></label>
+                  <label>Date<input required type="date" value={paymentForm.paymentDate} onChange={(event) => setPaymentForm({ ...paymentForm, paymentDate: event.target.value })} style={inputStyle} /></label>
+                  <label>Mode<select value={paymentForm.paymentMethod} onChange={(event) => setPaymentForm({ ...paymentForm, paymentMethod: event.target.value })} style={inputStyle}><option>Cash</option><option>UPI</option><option>Bank Transfer</option><option>Cheque</option><option>Other</option></select></label>
+                  <label>Kisne jama kiya?<input required value={paymentForm.receivedFrom} onChange={(event) => setPaymentForm({ ...paymentForm, receivedFrom: event.target.value })} placeholder="Customer / person name" style={inputStyle} /></label>
+                  <label>Payment kisne li?<input value={paymentForm.receivedBy} onChange={(event) => setPaymentForm({ ...paymentForm, receivedBy: event.target.value })} placeholder="Staff / owner name (optional)" style={inputStyle} /></label>
+                  <label>Note<input value={paymentForm.note} onChange={(event) => setPaymentForm({ ...paymentForm, note: event.target.value })} placeholder="Optional note" style={inputStyle} /></label>
+                </div>
+                <div style={cardActionRow}>
+                  <button type="submit" disabled={paymentBusy} style={paidBtn}>{paymentBusy ? "Saving..." : "Save Payment"}</button>
+                  <button type="button" disabled={paymentBusy} onClick={() => setShowPaymentForm(false)} style={secondaryBtn}>Cancel</button>
+                </div>
+              </form>
+            )}
+            <PaymentHistoryTable invoice={selectedInvoice} payments={paymentHistory} />
+          </section>
         )}
 
         {selectedInvoice && showReturnPanel && (
@@ -808,6 +882,11 @@ function OldBills() {
             <div>Balance: Rs. {selectedInvoice.remainingAmount || 0}/-</div>
           </div>
 
+          <div style={{ marginTop: 18, pageBreakInside: "avoid" }}>
+            <h3 style={{ margin: "0 0 8px", color: "#0f2963" }}>Payment History</h3>
+            <PaymentHistoryTable invoice={selectedInvoice} payments={paymentHistory} printMode />
+          </div>
+
           <div style={footerRow}>
             <div>Thank you for choosing Vaishnav.</div>
             <div>Authorised Signature</div>
@@ -817,6 +896,31 @@ function OldBills() {
         <div style={emptyState}>No bill selected.</div>
       )}
     </div>
+  );
+}
+
+function PaymentHistoryTable({ invoice, payments, printMode = false }) {
+  const recordedTotal = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const earlierUnitemized = Math.max(0, Number(invoice.paidAmount || 0) - recordedTotal);
+  const table = printMode ? { width: "100%", borderCollapse: "collapse", fontSize: 11 } : miniTable;
+  const th = printMode ? { padding: 6, border: "1px solid #cbd5e1", background: "#eff6ff", textAlign: "left" } : miniTh;
+  const td = printMode ? { padding: 6, border: "1px solid #cbd5e1" } : miniTd;
+
+  return (
+    <table style={table}>
+      <thead><tr><th style={th}>Date</th><th style={th}>Jama kiya</th><th style={th}>Amount</th><th style={th}>Mode</th><th style={th}>Received by / Note</th></tr></thead>
+      <tbody>
+        {earlierUnitemized > 0.005 && <tr><td style={td}>Purani entry</td><td style={td}>Naam/date pehle save nahi the</td><td style={td}>Rs. {earlierUnitemized.toFixed(2)}</td><td style={td}>-</td><td style={td}>Existing paid balance</td></tr>}
+        {payments.map((payment) => <tr key={payment.id}>
+          <td style={td}>{formatDate(payment.paymentDate)}</td>
+          <td style={td}>{payment.receivedFrom || "-"}</td>
+          <td style={td}>Rs. {Number(payment.amount || 0).toFixed(2)}</td>
+          <td style={td}>{payment.paymentMethod || "-"}</td>
+          <td style={td}>{[payment.receivedBy, payment.note].filter(Boolean).join(" · ") || "-"}</td>
+        </tr>)}
+        {!payments.length && earlierUnitemized <= 0.005 && <tr><td style={td} colSpan="5">Abhi tak payment record nahi hai.</td></tr>}
+      </tbody>
+    </table>
   );
 }
 
@@ -832,6 +936,12 @@ function uniqueInvoicesByNumber(invoiceList) {
 
 function formatDate(value) {
   return value ? String(value).slice(0, 10) : "-";
+}
+
+function emptyPaymentForm() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return { amount: "", paymentDate: now.toISOString().slice(0, 10), paymentMethod: "Cash", receivedFrom: "", receivedBy: "", note: "" };
 }
 
 function normalizeParty(value) {
@@ -912,6 +1022,9 @@ const miniDeleteBtn = { padding: "7px 10px", background: "#dc2626", color: "whit
 const miniPaidBtn = { padding: "7px 10px", background: "#128c7e", color: "white", border: "none", borderRadius: "5px", fontWeight: "bold", cursor: "pointer", fontSize: "12px" };
 const miniReturnBtn = { padding: "7px 10px", background: "#9c742a", color: "white", border: "none", borderRadius: "5px", fontWeight: "bold", cursor: "pointer", fontSize: "12px" };
 const paidBtn = { padding: "10px 16px", background: "#128c7e", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
+const paymentHistoryPanel = { background: "#fff", border: "1px solid #bfdbfe", borderRadius: 10, padding: 16, margin: "16px 0", boxShadow: "0 3px 10px rgba(15,41,99,.06)" };
+const paymentFormStyle = { background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 8, padding: 14, margin: "14px 0" };
+const paymentFormGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, alignItems: "end", marginBottom: 12 };
 const returnBtn = { padding: "10px 16px", background: "#9c742a", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
 const udharBadge = { display: "inline-block", width: "fit-content", background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: "999px", padding: "4px 8px", fontSize: "12px", fontWeight: "900" };
 const returnBadge = { display: "inline-block", width: "fit-content", background: "#fef3c7", color: "#92400e", border: "1px solid #fcd34d", borderRadius: "999px", padding: "4px 8px", fontSize: "12px", fontWeight: "900" };

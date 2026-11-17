@@ -1,6 +1,7 @@
 package com.vaishnav.Inventory.Controller;
 
 import com.vaishnav.Inventory.entity.Invoice;
+import com.vaishnav.Inventory.entity.InvoicePayment;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
 import com.vaishnav.Inventory.service.InvoiceService;
 import com.vaishnav.Inventory.service.InvoiceStorageService;
@@ -86,6 +87,17 @@ public class InvoiceController {
     @PutMapping("/{id}/mark-paid")
     public Invoice markInvoicePaid(@PathVariable Long id) {
         return invoiceService.markInvoicePaid(id);
+    }
+
+    @GetMapping("/{id}/payments")
+    public List<InvoicePayment> getInvoicePayments(@PathVariable Long id) {
+        return invoiceService.getInvoicePayments(id);
+    }
+
+    @PostMapping("/{id}/payments")
+    public Invoice recordInvoicePayment(@PathVariable Long id,
+                                        @RequestBody InvoiceService.PaymentRequest request) {
+        return invoiceService.recordInvoicePayment(id, request);
     }
 
     @PutMapping("/{id}/return-items")

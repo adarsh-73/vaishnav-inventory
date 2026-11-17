@@ -5,6 +5,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.vaishnav.Inventory.entity.Invoice;
 import com.vaishnav.Inventory.entity.InvoiceItem;
+import com.vaishnav.Inventory.entity.InvoicePayment;
 import com.vaishnav.Inventory.entity.StockHistory;
 import com.vaishnav.Inventory.entity.product;
 import com.vaishnav.Inventory.entity.Customer;
@@ -12,6 +13,7 @@ import com.vaishnav.Inventory.entity.DailyBookEntry;
 import com.vaishnav.Inventory.repository.CustomerRepository;
 import com.vaishnav.Inventory.repository.DailyBookEntryRepository;
 import com.vaishnav.Inventory.repository.InvoiceItemRepository;
+import com.vaishnav.Inventory.repository.InvoicePaymentRepository;
 import com.vaishnav.Inventory.repository.InvoiceRepository;
 import com.vaishnav.Inventory.repository.ProductRepository;
 import com.vaishnav.Inventory.repository.StockHistoryRepository;
@@ -38,6 +40,9 @@ public class InvoiceService {
 
     @Autowired
     private InvoiceItemRepository invoiceItemRepository;
+
+    @Autowired
+    private InvoicePaymentRepository invoicePaymentRepository;
 
     @Transactional
     public Invoice createInvoice(Invoice invoice) {
@@ -110,28 +115,80 @@ public class InvoiceService {
     public Invoice markInvoicePaid(Long id) {
         Invoice existing = invoiceRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Invoice not found"));
+        double remaining = existing.getRemainingAmount() == null ? 0 : existing.getRemainingAmount();
+        if (remaining <= 0) return existing;
+        PaymentRequest payment = new PaymentRequest();
+        payment.setAmount(remaining);
+        payment.setPaymentDate(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
+        payment.setPaymentMethod(existing.getPaymentMethod() == null ? "Cash/UPI" : existing.getPaymentMethod());
+        payment.setReceivedFrom(existing.getCustomer() == null ? "Walk-in Customer" : existing.getCustomer().getCustomerName());
+        payment.setNote("Full balance received");
+        return recordInvoicePayment(id, payment);
+    }
 
-        double totalAmount = existing.getTotalAmount() == null ? 0 : existing.getTotalAmount();
-        existing.setPaidAmount(totalAmount);
-        existing.setRemainingAmount(0.0);
-        existing.setPaymentMethod(existing.getPaymentMethod() == null ? "CASH/UPI" : existing.getPaymentMethod());
+    @Transactional(readOnly = true)
+    public java.util.List<InvoicePayment> getInvoicePayments(Long id) {
+        if (!invoiceRepository.existsById(id)) throw new RuntimeException("Invoice not found");
+        return invoicePaymentRepository.findByInvoiceIdOrderByPaymentDateAscIdAsc(id);
+    }
 
-        Invoice savedInvoice = invoiceRepository.save(existing);
+    public static class PaymentRequest {
+        private Double amount;
+        private java.time.LocalDate paymentDate;
+        private String paymentMethod;
+        private String receivedFrom;
+        private String receivedBy;
+        private String note;
 
-        if (existing.getInvoiceNumber() != null && !existing.getInvoiceNumber().isBlank()) {
-            DailyBookEntry entry = dailyBookEntryRepository
-                    .findFirstByNoteContainingIgnoreCase(existing.getInvoiceNumber())
-                    .orElse(new DailyBookEntry());
-            entry.setEntryType("income");
-            entry.setIncomeCategory(normalizeIncomeCategory(existing.getBusinessCategory(), existing.getInvoiceItems()));
-            entry.setPartyName(existing.getCustomer() != null ? existing.getCustomer().getCustomerName() : "Walk-in Customer");
-            entry.setNote("Invoice " + existing.getInvoiceNumber() + " (Udhar paid)");
-            entry.setAmount(totalAmount);
-            entry.setPaymentStatus("paid");
-            dailyBookEntryRepository.save(entry);
+        public Double getAmount() { return amount; }
+        public void setAmount(Double amount) { this.amount = amount; }
+        public java.time.LocalDate getPaymentDate() { return paymentDate; }
+        public void setPaymentDate(java.time.LocalDate paymentDate) { this.paymentDate = paymentDate; }
+        public String getPaymentMethod() { return paymentMethod; }
+        public void setPaymentMethod(String paymentMethod) { this.paymentMethod = paymentMethod; }
+        public String getReceivedFrom() { return receivedFrom; }
+        public void setReceivedFrom(String receivedFrom) { this.receivedFrom = receivedFrom; }
+        public String getReceivedBy() { return receivedBy; }
+        public void setReceivedBy(String receivedBy) { this.receivedBy = receivedBy; }
+        public String getNote() { return note; }
+        public void setNote(String note) { this.note = note; }
+    }
+
+    @Transactional
+    public Invoice recordInvoicePayment(Long id, PaymentRequest request) {
+        Invoice invoice = invoiceRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Invoice not found"));
+        double total = invoice.getTotalAmount() == null ? 0 : invoice.getTotalAmount();
+        double paid = invoice.getPaidAmount() == null
+                ? Math.max(0, total - (invoice.getRemainingAmount() == null ? total : invoice.getRemainingAmount()))
+                : invoice.getPaidAmount();
+        double remaining = Math.max(0, total - paid);
+        double amount = request == null || request.getAmount() == null ? 0 : request.getAmount();
+        if (!Double.isFinite(amount) || amount <= 0) throw new RuntimeException("Payment amount 0 se zyada hona chahiye");
+        if (amount > remaining + 0.005) throw new RuntimeException("Payment outstanding balance se zyada nahi ho sakta");
+
+        InvoicePayment payment = new InvoicePayment();
+        payment.setInvoice(invoice);
+        payment.setAmount(Math.round(amount * 100.0) / 100.0);
+        payment.setPaymentDate(request.getPaymentDate() == null
+                ? java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")) : request.getPaymentDate());
+        payment.setPaymentMethod(hasText(request.getPaymentMethod()) ? request.getPaymentMethod().trim() : "Cash");
+        payment.setReceivedFrom(hasText(request.getReceivedFrom()) ? request.getReceivedFrom().trim()
+                : invoice.getCustomer() == null ? "Walk-in Customer" : invoice.getCustomer().getCustomerName());
+        payment.setReceivedBy(hasText(request.getReceivedBy()) ? request.getReceivedBy().trim() : null);
+        payment.setNote(hasText(request.getNote()) ? request.getNote().trim() : null);
+        invoicePaymentRepository.save(payment);
+
+        double updatedPaid = Math.round((paid + payment.getAmount()) * 100.0) / 100.0;
+        invoice.setPaidAmount(updatedPaid);
+        invoice.setRemainingAmount(Math.max(0, Math.round((total - updatedPaid) * 100.0) / 100.0));
+        Invoice saved = invoiceRepository.save(invoice);
+
+        if (hasText(invoice.getInvoiceNumber())) {
+            dailyBookEntryRepository.findFirstByNoteContainingIgnoreCase(invoice.getInvoiceNumber()).ifPresent(entry ->
+                    entry.setPaymentStatus(saved.getRemainingAmount() > 0 ? "udhar" : "paid"));
         }
-
-        return savedInvoice;
+        return saved;
     }
 
     @Transactional
@@ -276,12 +333,29 @@ public class InvoiceService {
         double totalAmount = Math.max(0, subtotalAmount - discountAmount);
         invoice.setDiscountAmount(discountAmount);
         invoice.setTotalAmount(totalAmount);
-        double paidAmount = Math.max(0, invoice.getPaidAmount() == null ? totalAmount : invoice.getPaidAmount());
+        double recordedPayments = updatingId == null ? 0 : invoicePaymentRepository.sumAmountByInvoiceId(updatingId);
+        if (recordedPayments > totalAmount + 0.005) {
+            throw new RuntimeException("Bill total recorded payments se kam nahi ho sakta");
+        }
+        double requestedPaid = invoice.getPaidAmount() == null ? totalAmount : invoice.getPaidAmount();
+        double paidAmount = Math.max(recordedPayments, Math.max(0, requestedPaid));
         paidAmount = Math.min(paidAmount, totalAmount);
         invoice.setPaidAmount(paidAmount);
         invoice.setRemainingAmount(Math.max(0, totalAmount - paidAmount));
 
         Invoice savedInvoice = invoiceRepository.save(invoice);
+
+        if (updatingId == null && paidAmount > 0) {
+            InvoicePayment initialPayment = new InvoicePayment();
+            initialPayment.setInvoice(savedInvoice);
+            initialPayment.setAmount(paidAmount);
+            initialPayment.setPaymentDate(savedInvoice.getInvoiceDate() == null
+                    ? java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")) : savedInvoice.getInvoiceDate().toLocalDate());
+            initialPayment.setPaymentMethod(hasText(savedInvoice.getPaymentMethod()) ? savedInvoice.getPaymentMethod() : "Cash/UPI");
+            initialPayment.setReceivedFrom(savedInvoice.getCustomer() == null ? "Walk-in Customer" : savedInvoice.getCustomer().getCustomerName());
+            initialPayment.setNote("Payment received when bill was created");
+            invoicePaymentRepository.save(initialPayment);
+        }
 
         DailyBookEntry entry = dailyBookEntryRepository
                 .findFirstByNoteContainingIgnoreCase(invoice.getInvoiceNumber())
