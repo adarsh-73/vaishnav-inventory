@@ -23,6 +23,7 @@ function OldBills() {
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
+  const [paymentChoice, setPaymentChoice] = useState("custom");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const isUdharMode = searchParams.get("udhar") === "1";
   const selectedUdharParty = searchParams.get("party") || "";
@@ -374,13 +375,14 @@ function OldBills() {
     }
   };
 
-  const openPaymentForm = (invoice, payFullBalance = false) => {
+  const openPaymentForm = (invoice) => {
     setSelectedInvoice(invoice);
     setPaymentForm({
       ...emptyPaymentForm(),
-      amount: payFullBalance ? String(Number(invoice.remainingAmount || 0)) : "",
+      amount: "",
       receivedFrom: invoice.customer?.customerName || ""
     });
+    setPaymentChoice("custom");
     setShowPaymentForm(true);
   };
 
@@ -648,7 +650,7 @@ function OldBills() {
                     <td style={miniAmountTd}>Rs. {row.amount}</td>
                     <td style={miniTd}>
                       <button type="button" onClick={() => row.kind === "bill" ? setSelectedInvoice(row.invoice) : navigate("/daily-book")} style={miniEditBtn}>View</button>
-                      <button type="button" onClick={() => row.kind === "bill" ? openPaymentForm(row.invoice) : handleMarkDailyBookPaid(row.entry)} style={miniPaidBtn}>{row.kind === "bill" ? "Receive Payment" : "Paid"}</button>
+                      <button type="button" onClick={() => row.kind === "bill" ? openPaymentForm(row.invoice) : handleMarkDailyBookPaid(row.entry)} style={miniPaidBtn}>Paid</button>
                     </td>
                   </tr>
                 ))}
@@ -693,7 +695,7 @@ function OldBills() {
                     }}
                     style={miniPaidBtn}
                   >
-                    Receive Payment
+                    Paid
                   </button>
                 )}
                 <button
@@ -728,8 +730,7 @@ function OldBills() {
             <button onClick={handleDownloadPdf} style={secondaryBtn}>Download PDF</button>
             <button onClick={handleWhatsAppSend} style={whatsAppBtn}>WhatsApp Send</button>
             {Number(selectedInvoice.remainingAmount || 0) > 0 && <>
-              <button onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>Add Payment</button>
-              <button onClick={() => openPaymentForm(selectedInvoice, true)} style={secondaryBtn}>Settle Full Balance</button>
+              <button onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>Paid</button>
             </>}
             <button onClick={() => openReturnPanel(selectedInvoice)} style={returnBtn}>Return / Cancel Items</button>
             <button onClick={() => handleDeleteBill(selectedInvoice)} style={dangerBtn}>Delete Bill</button>
@@ -743,11 +744,15 @@ function OldBills() {
                 <h2 style={storageTitle}>Payment History · Bill {selectedInvoice.invoiceNumber || selectedInvoice.id}</h2>
                 <div style={subText}>Paid Rs. {Number(selectedInvoice.paidAmount || 0).toFixed(2)} · Balance Rs. {Number(selectedInvoice.remainingAmount || 0).toFixed(2)}</div>
               </div>
-              {Number(selectedInvoice.remainingAmount || 0) > 0 && <button type="button" onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>+ Add Payment</button>}
+              {Number(selectedInvoice.remainingAmount || 0) > 0 && <button type="button" onClick={() => openPaymentForm(selectedInvoice)} style={paidBtn}>Paid</button>}
             </div>
             {showPaymentForm && (
               <form onSubmit={handleSaveInvoicePayment} style={paymentFormStyle}>
                 <h3 style={{ margin: "0 0 12px", color: "#0f2963" }}>Record amount received</h3>
+                <div style={paymentChoiceRow}>
+                  <button type="button" onClick={() => { setPaymentChoice("full"); setPaymentForm({ ...paymentForm, amount: String(Number(selectedInvoice.remainingAmount || 0)) }); }} style={paymentChoice === "full" ? activePaymentChoice : secondaryBtn}>Full Balance · Rs. {Number(selectedInvoice.remainingAmount || 0).toFixed(2)}</button>
+                  <button type="button" onClick={() => { setPaymentChoice("custom"); setPaymentForm({ ...paymentForm, amount: "" }); }} style={paymentChoice === "custom" ? activePaymentChoice : secondaryBtn}>Custom Amount</button>
+                </div>
                 <div style={paymentFormGrid}>
                   <label>Amount received<input required type="number" min="0.01" step="0.01" max={Number(selectedInvoice.remainingAmount || 0)} value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} style={inputStyle} /></label>
                   <label>Date<input required type="date" value={paymentForm.paymentDate} onChange={(event) => setPaymentForm({ ...paymentForm, paymentDate: event.target.value })} style={inputStyle} /></label>
@@ -1025,6 +1030,8 @@ const paidBtn = { padding: "10px 16px", background: "#128c7e", color: "white", b
 const paymentHistoryPanel = { background: "#fff", border: "1px solid #bfdbfe", borderRadius: 10, padding: 16, margin: "16px 0", boxShadow: "0 3px 10px rgba(15,41,99,.06)" };
 const paymentFormStyle = { background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 8, padding: 14, margin: "14px 0" };
 const paymentFormGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, alignItems: "end", marginBottom: 12 };
+const paymentChoiceRow = { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 };
+const activePaymentChoice = { ...secondaryBtn, color: "#fff", background: "#0f2963" };
 const returnBtn = { padding: "10px 16px", background: "#9c742a", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" };
 const udharBadge = { display: "inline-block", width: "fit-content", background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: "999px", padding: "4px 8px", fontSize: "12px", fontWeight: "900" };
 const returnBadge = { display: "inline-block", width: "fit-content", background: "#fef3c7", color: "#92400e", border: "1px solid #fcd34d", borderRadius: "999px", padding: "4px 8px", fontSize: "12px", fontWeight: "900" };
